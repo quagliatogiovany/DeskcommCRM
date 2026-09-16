@@ -50,6 +50,7 @@ import {
 } from "./evolucao";
 import { crmListContactOrders, crmSearchProducts } from "./comercio";
 import { crmDescribeExternalData, crmQueryExternalData } from "./dados-externos";
+import { nodusConsultarCatalogo, nodusStatusPedido, nodusCriarPedido } from "./nodus";
 import { crmListPrivacyRequests } from "./privacidade";
 import {
   crmArchiveStage,
@@ -119,6 +120,8 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmDescribeExternalData,
   crmQueryExternalData,
   crmListPrivacyRequests,
+  nodusConsultarCatalogo,
+  nodusStatusPedido,
   // read — organizar a operação (W4)
   crmListStages,
   crmListTags,
@@ -148,6 +151,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmMoveLeadStage,
   crmSendWhatsappMessage,
   crmStartConversationAndSend,
+  nodusCriarPedido,
   crmAssignConversation,
   crmManageTags,
   // write — organizar a operação (W4)

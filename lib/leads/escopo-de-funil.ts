@@ -144,6 +144,9 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
   crm_create_webhook_source: "sem_funil",
   crm_set_webhook_source_active: "sem_funil",
   crm_set_automation_rule_active: "sem_funil",
+
+  // ---- ponte com o Nodus (Fase 4) — não toca crm_leads nem pipeline nenhum ----
+  nodus_criar_pedido: "sem_funil",
 };
 
 /**
