@@ -2,7 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { audit } from "@/lib/audit";
 
 /** Normaliza o nome da empresa para um slug candidato (citext unique no DB). */
-function slugify(name: string): string {
+export function slugify(name: string): string {
   const slug = name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
