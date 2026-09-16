@@ -892,6 +892,13 @@ export const AUDIT_ACTIONS = [
   // o dado que importa quando alguém pergunta "por que este cliente voltou a
   // receber?".
   "contact.unblocked",
+  // SSO servidor-a-servidor com o Nodus (Fase 5 do CRM externo): o dono da
+  // loja clica "Abrir CRM" sem digitar senha nova. `sso_login` é quem entrou
+  // de verdade; `sso_login_failed` é o token recusado (expirado, adulterado,
+  // organização não encontrada) — precisa da própria linha porque não há
+  // sessão nem `actor_user_id` ainda quando isso acontece.
+  "auth.sso_login",
+  "auth.sso_login_failed",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
