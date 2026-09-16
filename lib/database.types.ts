@@ -6198,6 +6198,7 @@ export type Database = {
           legal_name: string
           locale: string
           media_retention_days: number
+          nodus_api_key: string | null
           onboarded_at: string | null
           onboarding_state: Json
           privacy_policy_url: string | null
@@ -6224,6 +6225,7 @@ export type Database = {
           legal_name: string
           locale?: string
           media_retention_days?: number
+          nodus_api_key?: string | null
           onboarded_at?: string | null
           onboarding_state?: Json
           privacy_policy_url?: string | null
@@ -6250,6 +6252,7 @@ export type Database = {
           legal_name?: string
           locale?: string
           media_retention_days?: number
+          nodus_api_key?: string | null
           onboarded_at?: string | null
           onboarding_state?: Json
           privacy_policy_url?: string | null

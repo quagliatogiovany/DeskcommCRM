@@ -45,6 +45,7 @@ import {
   crmSaveOrgMemory,
 } from "./evolucao";
 import { crmListContactOrders, crmSearchProducts } from "./comercio";
+import { nodusConsultarCatalogo, nodusStatusPedido, nodusCriarPedido } from "./nodus";
 import { crmListPrivacyRequests } from "./privacidade";
 import {
   crmArchiveStage,
@@ -110,6 +111,8 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmListContactOrders,
   crmSearchProducts,
   crmListPrivacyRequests,
+  nodusConsultarCatalogo,
+  nodusStatusPedido,
   // read — organizar a operação (W4)
   crmListStages,
   crmListTags,
@@ -135,6 +138,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmUpdateLead,
   crmMoveLeadStage,
   crmSendWhatsappMessage,
+  nodusCriarPedido,
   crmAssignConversation,
   crmManageTags,
   // write — organizar a operação (W4)
