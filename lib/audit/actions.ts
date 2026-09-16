@@ -348,6 +348,7 @@ export const AUDIT_ACTIONS = [
   "auth.password_reset_failed",
   "tenant.created_by_signup",
   "tenant.created_by_recovery",
+  "tenant.created_by_provisioning_api",
   "conversation.snoozed",
   "conversation.snooze_cancelled",
   "conversation.snooze_watcher_run",
