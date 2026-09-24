@@ -21,7 +21,10 @@ export class NodusApiError extends Error {
   }
 }
 
-async function nodusApiKey(ctx: McpContext): Promise<string> {
+/** Só o que as tools nodus_* realmente usam do McpContext — permite chamar de fora do MCP (ex.: triagem Jev em pos-entrada.ts), sem precisar montar role/actor/apiTokenId fictícios. */
+export type NodusRequestCtx = Pick<McpContext, "supabase" | "organizationId">;
+
+async function nodusApiKey(ctx: NodusRequestCtx): Promise<string> {
   const { data, error } = await ctx.supabase
     .from("organizations")
     .select("nodus_api_key")
@@ -38,7 +41,7 @@ async function nodusApiKey(ctx: McpContext): Promise<string> {
 }
 
 export async function nodusRequest(
-  ctx: McpContext,
+  ctx: NodusRequestCtx,
   opts: { method: "GET" | "POST"; path: string; query?: Record<string, string>; body?: unknown },
 ): Promise<unknown> {
   const baseUrl = process.env.NODUS_BASE_URL;

@@ -38,6 +38,8 @@
  * um efeito faltando por uma tempestade de reentregas. Cada passo falha para
  * dentro, com log, e o seguinte roda mesmo assim.
  */
+import { randomUUID } from "node:crypto";
+
 import { audit } from "@/lib/audit";
 import { garantirLeadDaConversa } from "@/lib/leads/nascimento-do-lead";
 import {
@@ -54,6 +56,9 @@ import { ehContatoDoNumeroInterno } from "@/lib/escalacao/numero-interno-de-avis
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { autorizarContatoParaIA } from "@/lib/ai/elegibilidade/autorizacao";
 import { casarCampanha, lerCampanhas } from "@/lib/ai/elegibilidade/campanha";
+import { triageMessage } from "@/lib/ai/triage/jev";
+import { nodusRequest } from "@/lib/mcp/tools/nodus-client";
+import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -146,6 +151,7 @@ export async function aplicarEfeitosPosEntrada(
   await guardarOrigemDaPagina(admin, entrada);
   await abrirDemanda(admin, entrada);
   await avaliarCampanha(admin, entrada);
+  const resolvidoPeloJev = await resolverPorJev(admin, entrada);
   // A resposta do lead avança o follow-up AQUI. O despacho do agente (LLM)
   // vem depois: no Hobby ele estoura o tempo da request e o próximo texto
   // do fluxo ficava esperando o relógio.
@@ -155,7 +161,127 @@ export async function aplicarEfeitosPosEntrada(
     messageId: entrada.messageId,
     texto: entrada.texto,
   });
-  await pedirDespachoDoAgente(admin, entrada);
+  // Já respondido pela triagem Jev (status/estoque, confiança alta): não
+  // acorda o agente pra esta mensagem — economiza o turno de LLM inteiro.
+  if (!resolvidoPeloJev) {
+    await pedirDespachoDoAgente(admin, entrada);
+  }
+}
+
+const JEV_ACTOR_ID = "jev-triage";
+const JEV_CONFIANCA_MINIMA = 0.6;
+
+interface NodusPedidoResumo {
+  status: string;
+  total: number;
+}
+
+interface NodusCatalogoItem {
+  nome: string;
+  estoqueDisponivel: number;
+}
+
+function normalizarTexto(valor: string): string {
+  return valor
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+}
+
+/**
+ * 2c · Triagem Jev — resolve DIRETO "cadê meu pedido"/"vocês tem X" sem
+ * acordar o agente. Só age em `status_pedido`/`consulta_estoque` com
+ * confiança >= 0.6 (ver docs.typesafe.ai/patterns/confidence-routing — floor
+ * conservador porque errar aqui significa responder o cliente errado, não só
+ * silenciar). Qualquer outra coisa (incluindo erro/timeout do Jev, contato
+ * sem `nodus_api_key` configurada, produto não identificado) devolve `false`
+ * e deixa o passo 3 (`pedirDespachoDoAgente`) seguir normal — best-effort,
+ * mesmo espírito de `avaliarCampanha` acima.
+ *
+ * Responde via `sendMessageHandler`, o MESMO ponto de saída que o composer
+ * humano e o agente usam (`app/api/v1/messages/_handler.ts`) — herda de
+ * graça o guard `is_blocked` e o gate de pre-go-live do canal de teste.
+ */
+async function resolverPorJev(admin: Admin, entrada: EntradaDeMensagem): Promise<boolean> {
+  if (!entrada.texto || entrada.texto.trim() === "") return false;
+
+  try {
+    const triagem = await triageMessage(entrada.texto);
+    if (!triagem || triagem.intentConfidence < JEV_CONFIANCA_MINIMA) return false;
+    if (triagem.intent !== "status_pedido" && triagem.intent !== "consulta_estoque") return false;
+
+    const { data: contato } = await admin
+      .from("contacts")
+      .select("phone_number")
+      .eq("organization_id", entrada.organizationId)
+      .eq("id", entrada.contactId)
+      .maybeSingle();
+    const telefone = (contato?.phone_number as string | null) ?? null;
+    if (!telefone) return false;
+
+    const ctxNodus = { supabase: admin, organizationId: entrada.organizationId };
+    let resposta: string | null = null;
+
+    if (triagem.intent === "status_pedido") {
+      const body = (await nodusRequest(ctxNodus, {
+        method: "GET",
+        path: "api/integrations/deskcomm/pedidos",
+        query: { telefone, limite: "1" },
+      })) as { pedidos: NodusPedidoResumo[] };
+      const pedido = body.pedidos[0];
+      resposta = pedido
+        ? `Seu último pedido (${pedido.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}) está: ${pedido.status}.`
+        : "Não encontrei nenhum pedido seu por aqui.";
+    } else {
+      const body = (await nodusRequest(ctxNodus, {
+        method: "GET",
+        path: "api/integrations/deskcomm/catalogo",
+        query: { telefone },
+      })) as { produtos: NodusCatalogoItem[] };
+      const alvo = normalizarTexto(entrada.texto);
+      const matches = body.produtos.filter((p) => alvo.includes(normalizarTexto(p.nome)));
+      if (matches.length === 1 && matches[0]) {
+        const produto = matches[0];
+        resposta =
+          produto.estoqueDisponivel > 0
+            ? `Sim, temos ${produto.nome} disponível!`
+            : `${produto.nome} está sem estoque no momento.`;
+      } else if (matches.length > 1) {
+        resposta = `Encontrei mais de um produto parecido: ${matches
+          .slice(0, 5)
+          .map((p) => p.nome)
+          .join(", ")}. Qual deles você quer saber?`;
+      } else {
+        return false; // não achou produto no catálogo — deixa o agente tentar entender
+      }
+    }
+
+    if (!resposta) return false;
+
+    await sendMessageHandler(
+      admin,
+      {
+        organization_id: entrada.organizationId,
+        actor: { type: "ai_agent", id: JEV_ACTOR_ID, role: "manager" },
+        requestId: entrada.requestId ?? randomUUID(),
+      },
+      { conversation_id: entrada.conversationId, type: "text", body: resposta },
+    );
+
+    logger.info("pos-entrada: resolvido pela triagem Jev, agente nao despachado", {
+      organization_id: entrada.organizationId,
+      conversation_id: entrada.conversationId,
+      intent: triagem.intent,
+    });
+    return true;
+  } catch (err) {
+    logger.warn("pos-entrada: triagem Jev falhou, segue pro agente normal", {
+      organization_id: entrada.organizationId,
+      conversation_id: entrada.conversationId,
+      detail: err instanceof Error ? err.message.slice(0, 160) : "desconhecido",
+    });
+    return false;
+  }
 }
 
 /**
