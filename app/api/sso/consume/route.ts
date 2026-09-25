@@ -21,6 +21,8 @@
  * Fase 3 do plano. `email` identifica de forma estável quem é o dono entre
  * chamadas (múltiplos cliques = mesmo usuário, idempotente).
  */
+import { createHash } from "node:crypto";
+
 import { type NextRequest, NextResponse } from "next/server";
 
 import { verifySsoToken } from "@/lib/auth/sso-token";
@@ -31,6 +33,29 @@ import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+// O cookie de sessão é SameSite=Strict e esta rota é alcançada por navegação
+// vinda do Nodus (outro site): um 302 direto pra tela autenticada segue sendo
+// parte dessa cadeia cross-site, o navegador NÃO envia o cookie recém-gravado e
+// o `proxy` manda pro /login. Entregar um documento same-origin (que já leva o
+// Set-Cookie) e navegar DELE restaura o envio — mesma técnica de
+// `app/auth/social-return/route.ts`. Destino fixo; nada da query é refletido.
+function entregaComSessao(path: string): Response {
+  const script = `window.location.replace(${JSON.stringify(path)});`;
+  const hash = createHash("sha256").update(script).digest("base64");
+  return new Response(
+    `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Entrando…</title><body><p>Entrando…</p><a href="${path}">Continuar</a><script>${script}</script></body></html>`,
+    {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": `default-src 'none'; script-src 'sha256-${hash}'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'`,
+      },
+    },
+  );
+}
 
 export async function GET(request: NextRequest): Promise<Response> {
   const redirectTo = (path: string) => NextResponse.redirect(new URL(path, env.NEXT_PUBLIC_APP_URL));
@@ -139,5 +164,5 @@ export async function GET(request: NextRequest): Promise<Response> {
     metadata: { source: "nodus" },
   });
 
-  return redirectTo("/onboarding/welcome");
+  return entregaComSessao("/onboarding/welcome");
 }

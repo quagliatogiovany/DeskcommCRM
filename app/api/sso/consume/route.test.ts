@@ -68,6 +68,12 @@ function requisicao(qs: string) {
   return new NextRequest(`http://localhost:3000/api/sso/consume?${qs}`);
 }
 
+async function destinoDoDocumento(res: Response): Promise<string> {
+  expect(res.status).toBe(200);
+  const m = /window\.location\.replace\(("[^"]+")\)/.exec(await res.text());
+  return m ? (JSON.parse(m[1]) as string) : "";
+}
+
 function destino(res: Response): string {
   const url = new URL(res.headers.get("location") ?? "");
   return url.pathname + url.search;
@@ -131,7 +137,7 @@ describe("GET /api/sso/consume", () => {
       expect.objectContaining({ user_id: USUARIO_EXISTENTE.id, organization_id: ORG.id, role: "admin" }),
     );
     expect(verifyOtp).toHaveBeenCalledWith({ type: "magiclink", token_hash: HASHED_TOKEN });
-    expect(destino(res)).toBe("/onboarding/welcome");
+    expect(await destinoDoDocumento(res)).toBe("/onboarding/welcome");
     expect(vi.mocked(audit)).toHaveBeenCalledWith(
       expect.objectContaining({ action: "auth.sso_login", actorUserId: USUARIO_EXISTENTE.id }),
     );
@@ -152,7 +158,7 @@ describe("GET /api/sso/consume", () => {
     expect(createUser).not.toHaveBeenCalled();
     expect(insertMembership).not.toHaveBeenCalled();
     expect(updateMembership).not.toHaveBeenCalled();
-    expect(destino(res)).toBe("/onboarding/welcome");
+    expect(await destinoDoDocumento(res)).toBe("/onboarding/welcome");
   });
 
   it("membership revogada: reativa em vez de recusar", async () => {
@@ -170,7 +176,7 @@ describe("GET /api/sso/consume", () => {
     expect(updateMembership).toHaveBeenCalledWith(
       expect.objectContaining({ revoked_at: null, role: "admin" }),
     );
-    expect(destino(res)).toBe("/onboarding/welcome");
+    expect(await destinoDoDocumento(res)).toBe("/onboarding/welcome");
   });
 
   it("generateLink falha: recusa com erro próprio, não deixa sem saída", async () => {
