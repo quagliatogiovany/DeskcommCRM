@@ -10,7 +10,10 @@
  */
 import { logger } from "@/lib/logger";
 
-const JEV_URL = "https://api.typesafe.ai/v1/systemone";
+// Base configurável, mesma convenção do SDK da TypeSafe: pra cobrar na conta do
+// OpenRouter (mesmo formato de request/response), TYPESAFE_BASE_URL=https://openrouter.ai/api
+// e TYPESAFE_API_KEY = a chave do OpenRouter.
+const jevUrl = () => `${(process.env.TYPESAFE_BASE_URL ?? "https://api.typesafe.ai").replace(/\/+$/, "")}/v1/systemone`;
 
 export type JevIntent = "status_pedido" | "consulta_estoque" | "pedido_novo" | "venda_complexa" | "spam";
 
@@ -32,7 +35,7 @@ export async function triageMessage(text: string): Promise<JevTriage | null> {
   if (!apiKey) return null;
 
   try {
-    const res = await fetch(JEV_URL, {
+    const res = await fetch(jevUrl(), {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
