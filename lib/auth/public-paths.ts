@@ -71,6 +71,11 @@ export const PUBLIC_PATHS: RegExp[] = [
   /^\/api\/v1\/plataformas-de-anuncio\/google\/callback$/,
   /^\/api\/v1\/integrations\/nuvemshop\/callback$/,
   /^\/api\/internal\//,
+  // SSO vindo do Nodus: navegação de topo de outro site, sem cookie de sessão
+  // (SameSite=Strict). A identidade vem do token HMAC de 60s (`CRM_SSO_SECRET`),
+  // verificado DENTRO da rota, que só então cria a sessão. Âncora `$`: nenhum
+  // sub-path futuro nasce público de carona.
+  /^\/api\/sso\/consume$/,
   /^\/api\/mcp(\/.*)?$/,
   // GET /api/v1/contacts aceita SESSÃO ou Bearer `dsk_...` (api_tokens) — a
   // MESMA dualidade de `/api/mcp` acima. Sem esta entrada, o proxy responde
