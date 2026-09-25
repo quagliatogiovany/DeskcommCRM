@@ -171,6 +171,19 @@ export async function aplicarEfeitosPosEntrada(
 const JEV_ACTOR_ID = "jev-triage";
 const JEV_CONFIANCA_MINIMA = 0.6;
 
+// Status do pedido (enum `OrderStatus` do Nodus) em linguagem de cliente. O que
+// não estiver aqui cai num texto neutro — nunca o código cru ("PREPARING").
+const STATUS_PEDIDO_PARA_CLIENTE: Record<string, string> = {
+  PENDING_PAYMENT: "aguardando o pagamento",
+  PAID: "com pagamento confirmado, já vamos separar",
+  PREPARING: "em preparo",
+  OUT_FOR_DELIVERY: "a caminho, com o motoboy",
+  ARRIVED: "com o motoboy no seu endereço",
+  DELIVERED: "entregue",
+  CANCELED: "cancelado",
+  RETURNED: "devolvido",
+};
+
 interface NodusPedidoResumo {
   status: string;
   total: number;
@@ -230,7 +243,7 @@ async function resolverPorJev(admin: Admin, entrada: EntradaDeMensagem): Promise
       })) as { pedidos: NodusPedidoResumo[] };
       const pedido = body.pedidos[0];
       resposta = pedido
-        ? `Seu último pedido (${pedido.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}) está: ${pedido.status}.`
+        ? `Seu último pedido (${pedido.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}) está ${STATUS_PEDIDO_PARA_CLIENTE[pedido.status] ?? "sendo acompanhado pela nossa equipe"}.`
         : "Não encontrei nenhum pedido seu por aqui.";
     } else {
       const body = (await nodusRequest(ctxNodus, {
