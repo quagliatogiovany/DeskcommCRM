@@ -242,9 +242,10 @@ async function resolverPorJev(admin: Admin, entrada: EntradaDeMensagem): Promise
         query: { telefone, limite: "1" },
       })) as { pedidos: NodusPedidoResumo[] };
       const pedido = body.pedidos[0];
-      resposta = pedido
-        ? `Seu último pedido (${pedido.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}) está ${STATUS_PEDIDO_PARA_CLIENTE[pedido.status] ?? "sendo acompanhado pela nossa equipe"}.`
-        : "Não encontrei nenhum pedido seu por aqui.";
+      // Sem pedido = pode ser cliente ainda não cadastrado (o Nodus devolve lista vazia, não NAO_ATIVO).
+      // Não responder aqui: o agente aplica a regra de cadastro por indicação.
+      if (!pedido) return false;
+      resposta = `Seu último pedido (${pedido.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}) está ${STATUS_PEDIDO_PARA_CLIENTE[pedido.status] ?? "sendo acompanhado pela nossa equipe"}.`;
     } else {
       const body = (await nodusRequest(ctxNodus, {
         method: "GET",
