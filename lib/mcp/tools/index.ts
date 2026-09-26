@@ -50,7 +50,7 @@ import {
 } from "./evolucao";
 import { crmListContactOrders, crmSearchProducts } from "./comercio";
 import { crmDescribeExternalData, crmQueryExternalData } from "./dados-externos";
-import { nodusConsultarCatalogo, nodusStatusPedido, nodusCriarPedido } from "./nodus";
+import { nodusConsultarCatalogo, nodusStatusPedido, nodusCriarPedido, nodusSolicitarCancelamento } from "./nodus";
 import { crmListPrivacyRequests } from "./privacidade";
 import {
   crmArchiveStage,
@@ -152,6 +152,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmSendWhatsappMessage,
   crmStartConversationAndSend,
   nodusCriarPedido,
+  nodusSolicitarCancelamento,
   crmAssignConversation,
   crmManageTags,
   // write — organizar a operação (W4)

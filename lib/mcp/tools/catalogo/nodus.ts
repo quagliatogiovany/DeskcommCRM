@@ -39,4 +39,14 @@ export const TOOLS_NODUS = declararTools([
     risco: "critico",
     pacotes: ["vender"],
   },
+  {
+    name: "nodus_solicitar_cancelamento",
+    category: "write",
+    rotulo: "Avisar a loja que o cliente quer cancelar um pedido",
+    explicacao:
+      "Não cancela nada: avisa o dono da loja (sino e WhatsApp) que o cliente pediu cancelamento, para uma pessoa decidir.",
+    oQueToca: "Pedidos da loja de delivery",
+    risco: "atencao",
+    pacotes: ["atender"],
+  },
 ]);

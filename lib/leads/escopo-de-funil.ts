@@ -147,6 +147,7 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
 
   // ---- ponte com o Nodus (Fase 4) — não toca crm_leads nem pipeline nenhum ----
   nodus_criar_pedido: "sem_funil",
+  nodus_solicitar_cancelamento: "sem_funil",
 };
 
 /**

@@ -192,3 +192,40 @@ export const nodusCriarPedido: McpToolDefinition<typeof criarPedidoInputShape> =
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// nodus_solicitar_cancelamento
+// ---------------------------------------------------------------------------
+
+const solicitarCancelamentoInputShape = {
+  telefone: z.string().trim().min(8).describe("Telefone do cliente, o mesmo usado no cadastro."),
+  order_id: z.string().trim().min(1).describe("`orderId` do pedido, vindo de nodus_status_pedido."),
+  motivo: z.string().trim().min(3).max(300).describe("Motivo dito pelo cliente, em uma frase."),
+};
+
+export const nodusSolicitarCancelamento: McpToolDefinition<typeof solicitarCancelamentoInputShape> = {
+  name: "nodus_solicitar_cancelamento",
+  description:
+    "Avisa o dono da loja que o cliente quer cancelar um pedido. NÃO cancela: quem decide é uma pessoa " +
+    "(estoque, motoboy e Pix já podem ter andado). Depois de chamar, diga ao cliente que o pedido de " +
+    "cancelamento foi passado à loja e que ela retorna em breve — nunca diga que foi cancelado.",
+  inputSchema: solicitarCancelamentoInputShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  handler: async (input, ctx) => {
+    try {
+      const body = (await nodusRequest(ctx, {
+        method: "POST",
+        path: "api/integrations/deskcomm/pedidos/cancelamento",
+        body: { telefone: input.telefone, orderId: input.order_id, motivo: input.motivo },
+      })) as { orderId: string; status: string };
+      return { sucesso: true, ...body };
+    } catch (err) {
+      if (err instanceof NodusApiError) {
+        return { sucesso: false, mensagem: mensagemParaCodigoNodus(err.code, err.message) };
+      }
+      throw err;
+    }
+  },
+};

@@ -105,6 +105,10 @@ export function mensagemParaCodigoNodus(code: string | null, fallback: string): 
       return "Um dos produtos informados não existe (ou não está à venda) no catálogo da loja. Use nodus_consultar_catalogo antes de montar o pedido.";
     case "ABAIXO_DO_MINIMO":
       return fallback; // já vem com o valor mínimo formatado, dito ao cliente é o suficiente.
+    case "PEDIDO_NAO_ENCONTRADO":
+      return "Não achei esse pedido para este cliente. Confira com nodus_status_pedido.";
+    case "PEDIDO_ENCERRADO":
+      return "Esse pedido já foi entregue ou cancelado; não há o que cancelar. Explique ao cliente.";
     case "SEM_ESTOQUE":
       return fallback; // já vem com o nome do produto sem estoque.
     default:
