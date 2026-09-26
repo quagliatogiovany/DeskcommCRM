@@ -91,9 +91,9 @@ export function mensagemParaCodigoNodus(code: string | null, fallback: string): 
     case "NAO_ATIVO":
     case "PRECISA_CODIGO":
       return (
-        "Este cliente ainda não tem cadastro liberado na loja (Nodus exige indicação + " +
-        "cadastro antes de comprar, e o agente ainda não tem essa ferramenta). Explique que " +
-        "o cadastro precisa ser feito pelo link do catálogo da loja, ou chame um humano."
+        "Este cliente ainda não tem cadastro liberado na loja. Peça o Código de Indicação de quem o recomendou, " +
+        "confira com nodus_validar_codigo_indicacao e, se válido, peça nome e endereço e chame nodus_ativar_cliente. " +
+        "Não ofereça produto nem link do catálogo antes disso."
       );
     case "LOJA_FECHADA":
       return "A loja está fechada agora. Informe o horário de reabertura, se souber, e não insista no pedido.";

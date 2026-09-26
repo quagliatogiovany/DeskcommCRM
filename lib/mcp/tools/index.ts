@@ -50,7 +50,15 @@ import {
 } from "./evolucao";
 import { crmListContactOrders, crmSearchProducts } from "./comercio";
 import { crmDescribeExternalData, crmQueryExternalData } from "./dados-externos";
-import { nodusConsultarCatalogo, nodusStatusPedido, nodusCriarPedido, nodusSolicitarCancelamento } from "./nodus";
+import {
+  nodusConsultarCatalogo,
+  nodusStatusPedido,
+  nodusCriarPedido,
+  nodusSolicitarCancelamento,
+  nodusConsultarPromocoes,
+  nodusValidarCodigoIndicacao,
+  nodusAtivarCliente,
+} from "./nodus";
 import { crmListPrivacyRequests } from "./privacidade";
 import {
   crmArchiveStage,
@@ -121,6 +129,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmQueryExternalData,
   crmListPrivacyRequests,
   nodusConsultarCatalogo,
+  nodusConsultarPromocoes,
   nodusStatusPedido,
   // read — organizar a operação (W4)
   crmListStages,
@@ -153,6 +162,8 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmStartConversationAndSend,
   nodusCriarPedido,
   nodusSolicitarCancelamento,
+  nodusValidarCodigoIndicacao,
+  nodusAtivarCliente,
   crmAssignConversation,
   crmManageTags,
   // write — organizar a operação (W4)

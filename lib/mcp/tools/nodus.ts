@@ -229,3 +229,106 @@ export const nodusSolicitarCancelamento: McpToolDefinition<typeof solicitarCance
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// nodus_consultar_promocoes
+// ---------------------------------------------------------------------------
+
+const consultarPromocoesInputShape = {};
+
+export const nodusConsultarPromocoes: McpToolDefinition<typeof consultarPromocoesInputShape> = {
+  name: "nodus_consultar_promocoes",
+  description:
+    "Lista as promoções da loja de delivery (Nodus) ativas HOJE e o link do catálogo. Use pra avisar o " +
+    "cliente das ofertas e convidá-lo a abrir o link do catálogo: o desconto é aplicado sozinho no " +
+    "checkout de lá. Não invente promoção que não veio aqui e não prometa desconto no pedido feito pela conversa.",
+  inputSchema: consultarPromocoesInputShape,
+  category: "read",
+  requiresRole: "agent",
+  requiresScope: "mcp:read",
+  handler: async (_input, ctx) => {
+    try {
+      const body = await nodusRequest(ctx, { method: "GET", path: "api/integrations/deskcomm/promocoes" });
+      return { sucesso: true, ...(body as object) };
+    } catch (err) {
+      if (err instanceof NodusApiError) {
+        return { sucesso: false, mensagem: mensagemParaCodigoNodus(err.code, err.message) };
+      }
+      throw err;
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// nodus_validar_codigo_indicacao
+// ---------------------------------------------------------------------------
+
+const validarCodigoInputShape = {
+  telefone: z.string().trim().min(8).describe("Telefone do cliente que está mandando o código."),
+  codigo: z.string().trim().min(3).max(40).describe("Código de indicação que o cliente enviou, ex.: NODUS-AB12."),
+};
+
+export const nodusValidarCodigoIndicacao: McpToolDefinition<typeof validarCodigoInputShape> = {
+  name: "nodus_validar_codigo_indicacao",
+  description:
+    "Confere um código de indicação de cliente novo na loja de delivery (Nodus). Cliente sem cadastro só " +
+    "continua o atendimento depois de um código válido. Resposta `valido: true` → peça nome e endereço e " +
+    "chame nodus_ativar_cliente. `valido: false` → peça o código de novo. `aguardandoHumano: true` (2 erros) → " +
+    "NÃO responda mais nada ao cliente: chame a transferência para humano em silêncio; o dono da loja já foi avisado.",
+  inputSchema: validarCodigoInputShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  handler: async (input, ctx) => {
+    try {
+      const body = await nodusRequest(ctx, {
+        method: "POST",
+        path: "api/integrations/deskcomm/clientes/validar-codigo",
+        body: { telefone: input.telefone, codigo: input.codigo },
+      });
+      return { sucesso: true, ...(body as object) };
+    } catch (err) {
+      if (err instanceof NodusApiError) {
+        return { sucesso: false, mensagem: mensagemParaCodigoNodus(err.code, err.message) };
+      }
+      throw err;
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// nodus_ativar_cliente
+// ---------------------------------------------------------------------------
+
+const ativarClienteInputShape = {
+  telefone: z.string().trim().min(8).describe("Telefone do cliente (o mesmo do código validado)."),
+  nome: z.string().trim().min(2).max(120).describe("Nome do cliente."),
+  endereco: z.string().trim().min(5).max(300).describe("Endereço completo, com bairro."),
+};
+
+export const nodusAtivarCliente: McpToolDefinition<typeof ativarClienteInputShape> = {
+  name: "nodus_ativar_cliente",
+  description:
+    "Conclui o cadastro do cliente na loja de delivery (Nodus) com nome e endereço, depois de " +
+    "nodus_validar_codigo_indicacao ter dado `valido: true`. Devolve o código de indicação DELE e o link do " +
+    "catálogo — envie os dois ao cliente e siga o atendimento normal.",
+  inputSchema: ativarClienteInputShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  handler: async (input, ctx) => {
+    try {
+      const body = await nodusRequest(ctx, {
+        method: "POST",
+        path: "api/integrations/deskcomm/clientes/ativar",
+        body: { telefone: input.telefone, nome: input.nome, endereco: input.endereco },
+      });
+      return { sucesso: true, ...(body as object) };
+    } catch (err) {
+      if (err instanceof NodusApiError) {
+        return { sucesso: false, mensagem: mensagemParaCodigoNodus(err.code, err.message) };
+      }
+      throw err;
+    }
+  },
+};

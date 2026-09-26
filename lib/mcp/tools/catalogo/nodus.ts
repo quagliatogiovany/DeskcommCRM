@@ -49,4 +49,34 @@ export const TOOLS_NODUS = declararTools([
     risco: "atencao",
     pacotes: ["atender"],
   },
+  {
+    name: "nodus_consultar_promocoes",
+    category: "read",
+    rotulo: "Ver as promoções ativas da loja de delivery",
+    explicacao:
+      "Mostra as promoções ativas hoje na loja de delivery (Nodus), para o assistente avisar o cliente e mandar o link do catálogo, onde o desconto aparece no checkout.",
+    oQueToca: "Clientes e promoções da loja de delivery",
+    risco: "seguro",
+    pacotes: ["atender"],
+  },
+  {
+    name: "nodus_validar_codigo_indicacao",
+    category: "write",
+    rotulo: "Conferir o código de indicação de um cliente novo",
+    explicacao:
+      "Confere se o código de indicação que o cliente novo enviou é válido na loja de delivery (Nodus). Com 2 erros o assistente para de responder e o dono é avisado.",
+    oQueToca: "Clientes e promoções da loja de delivery",
+    risco: "atencao",
+    pacotes: ["atender"],
+  },
+  {
+    name: "nodus_ativar_cliente",
+    category: "write",
+    rotulo: "Cadastrar o cliente novo na loja de delivery",
+    explicacao:
+      "Conclui o cadastro (nome e endereço) de um cliente que já validou o código de indicação, e devolve o código de indicação dele.",
+    oQueToca: "Clientes e promoções da loja de delivery",
+    risco: "atencao",
+    pacotes: ["atender"],
+  },
 ]);
