@@ -1041,7 +1041,13 @@ async function invokeBot(ctx: BotContext, model: LanguageModel): Promise<BotResp
 // ---------------------------------------------------------------------------
 
 function postProcess(text: string): { text: string; flags: string[] } {
-  const trimmed = text.trim();
+  // Mesmo saneamento de lib/agent-engine/agent/inbound-turn.ts (send_message):
+  // alguns modelos escrevem `\n` como texto em vez de quebra de linha real.
+  const semEscapeLiteral = text
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t");
+  const trimmed = semEscapeLiteral.trim();
   // Hard cap to avoid sending wall-of-text. WhatsApp soft-limit is ~4096; keep headroom.
   const capped = trimmed.length > 3500 ? `${trimmed.slice(0, 3500).trimEnd()}…` : trimmed;
   return { text: capped, flags: [] };

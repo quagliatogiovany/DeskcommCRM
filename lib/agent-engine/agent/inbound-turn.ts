@@ -2919,7 +2919,19 @@ async function executarTurnoDoAgente(
     }),
     send_message: tool({
       ...AGENT_TOOL_DEFS.send_message,
-      execute: async ({ body, produto_codigo }) => {
+      execute: async ({ body: corpoDoModelo, produto_codigo }) => {
+        // O modelo às vezes escreve a sequência de dois caracteres `\n` como
+        // TEXTO em vez de quebra de linha de verdade — o cliente recebe
+        // "Pronto!\n\nAqui está" ao pé da letra (relatado 2026-09-29). Isto
+        // NÃO é bug de escaping do nosso lado (JSON.stringify → WAHA está
+        // correto): é o texto que sai do modelo. Normaliza aqui, ANTES de
+        // qualquer gate, para que TUDO abaixo (`body`) já saia limpo,
+        // independente do modelo/provider da org.
+        const body = corpoDoModelo
+          .replace(/\\r\\n/g, '\n')
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t');
+
         // CORPO VAZIO NÃO SAI. Medido ao vivo (2026-09-19): o `gpt-4o-mini`
         // chamou `send_message` várias vezes com corpo que virou vazio e o
         // WhatsApp do cliente recebeu bolhas em branco. O schema garante
