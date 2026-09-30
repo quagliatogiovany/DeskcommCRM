@@ -104,7 +104,7 @@ CRONS="
 # de hora em hora, e quem decide o momento é o relógio de parede de CADA
 # organização — a rodada só abre naquela cuja hora configurada bateu. Minuto
 # próprio pra não disputar a mesma batida das outras varreduras horárias.
-# Organização com `recorrencia: 'manual'` nunca é varrida aqui.
+# Organização com recorrencia 'manual' nunca é varrida aqui.
 43 * * * *|60|api/v1/cron/recuperacao-clientes
 # A DATA DO FUNIL (#989). Mesma cadência e mesmo motivo do aniversário: de hora
 # em hora, e quem decide o momento é o relógio de parede de CADA organização —
