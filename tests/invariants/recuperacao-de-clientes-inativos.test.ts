@@ -1,15 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import {
-  GOV_ADMIN,
-  GOV_MANAGER,
-  GOV_ORG,
-  GOV_VIEWER,
-  countAs,
-  seedGov,
-  sql,
-  writeCountAs,
-} from "./gov-helpers";
+import { GOV_ADMIN, GOV_MANAGER, GOV_ORG, GOV_VIEWER, countAs, seedGov, sql } from "./gov-helpers";
 
 /**
  * A RECUPERAÇÃO DE CLIENTES INATIVOS SÓ ESCREVE POR QUEM PODE, E SÓ COM DADO
@@ -20,10 +11,21 @@ import {
  * alcança é se a RLS e os CHECK realmente valem contra Postgres real. É o que
  * este arquivo mede, em três blocos:
  *
- *   A. RLS de `recuperacao_config`: leitura é por tenant SEM gate de papel
- *      (`viewer` lê), escrita exige `manager` (`viewer` é recusado, `admin`
- *      passa), e nenhuma organização vizinha alcança a linha alheia — nem pra
- *      ler, nem pra escrever.
+ *   A. GRANT + RLS de `recuperacao_config`: `authenticated` só tem SELECT —
+ *      igual à doutrina de `campanha-escreve-como-servidor.test.ts` pra
+ *      `campaigns` (0375). MEDIDO, não suposto: a primeira versão deste
+ *      arquivo tentava provar "viewer recusado, manager passa" fazendo os
+ *      dois tentarem INSERT pela sessão — os SEIS casos falharam contra
+ *      Postgres real com `permission denied for table recuperacao_config`,
+ *      **antes** da RLS sequer avaliar, porque o GRANT do apêndice
+ *      (`grant select ... to authenticated`) nunca concedeu INSERT/UPDATE
+ *      nenhum. É a mesma defesa em profundidade de `campaigns`: o
+ *      `fn_role_at_least(organization_id, 'manager')` da policy de escrita
+ *      (medido em `tests/unit/...`) é o backstop pro dia em que o GRANT
+ *      afrouxar — hoje quem escreve é SEMPRE o servidor com `service_role`
+ *      (`createAdminClient()`, já medido no unit), nunca a sessão do
+ *      usuário, e a leitura (SELECT, com gate de tenant mas sem gate de
+ *      papel) é a única porta que o navegador tem.
  *   B. As onze CHECK de `recuperacao_config`: cada uma recusa o valor que ela
  *      existe pra barrar, com o NOME da constraint na mensagem — não um 500
  *      genérico. Uma linha válida no fim prova que as onze juntas não
@@ -72,8 +74,19 @@ function contarComoPostgres(where: string): number {
   return Number(sql(`select count(*) from public.recuperacao_config where ${where};`));
 }
 
-function mensagemAtual(org: string): string {
-  return sql(`select mensagem from public.recuperacao_config where organization_id = '${org}';`);
+/** Tenta a DML como `authenticated` com o JWT do usuário; devolve o texto do erro, ou "" se passou. */
+function negadoComoUsuario(userId: string, dml: string): string {
+  try {
+    sql(`
+      set role authenticated;
+      select set_config('request.jwt.claims', '{"sub":"${userId}"}', false);
+      ${dml};
+    `);
+    return "";
+  } catch (e) {
+    const err = e as { stderr?: string };
+    return err.stderr ?? String(e);
+  }
 }
 
 beforeAll(() => {
@@ -96,45 +109,51 @@ beforeAll(() => {
   `);
 });
 
-describe("A — RLS de recuperacao_config (0417)", () => {
-  it("viewer NÃO cria linha — o INSERT é recusado pelo WITH CHECK da policy de escrita", () => {
-    const linhas = writeCountAs(
-      GOV_VIEWER,
-      `insert into public.recuperacao_config (organization_id, base_legal) values ('${GOV_ORG}', 'consent')`,
-    );
-    expect(linhas, "viewer conseguiu criar a configuração — a policy de escrita não exige manager").toBe(0);
-    expect(contarComoPostgres(`organization_id = '${GOV_ORG}'`)).toBe(0);
+describe("A — GRANT + RLS de recuperacao_config (0417)", () => {
+  it("authenticated só tem SELECT — INSERT/UPDATE/DELETE são do GRANT, sem chance nenhuma pela sessão", () => {
+    const linha = sql(`
+      select has_table_privilege('authenticated', 'public.recuperacao_config', 'SELECT')
+        || ',' || has_table_privilege('authenticated', 'public.recuperacao_config', 'INSERT')
+        || ',' || has_table_privilege('authenticated', 'public.recuperacao_config', 'UPDATE')
+        || ',' || has_table_privilege('authenticated', 'public.recuperacao_config', 'DELETE');
+    `);
+    expect(linha, `esperava "true,false,false,false", veio "${linha}"`).toBe("true,false,false,false");
   });
 
-  it("manager cria a linha — é o piso de papel que a rota /api/v1/recuperacao/config cobra", () => {
-    const linhas = writeCountAs(
+  it("nem MANAGER cria linha pela sessão — permission denied do GRANT, antes da RLS avaliar", () => {
+    const erro = negadoComoUsuario(
       GOV_MANAGER,
       `insert into public.recuperacao_config (organization_id, base_legal) values ('${GOV_ORG}', 'consent')`,
     );
-    expect(linhas, "manager foi recusado — a tela de configuração pararia de salvar").toBe(1);
+    expect(erro, "manager conseguiu escrever pela sessão — o GRANT do apêndice afrouxou").toContain(
+      "permission denied for table recuperacao_config",
+    );
+    expect(contarComoPostgres(`organization_id = '${GOV_ORG}'`)).toBe(0);
+  });
+
+  it("nem ADMIN — o GRANT não distingue papel nenhum, é o mesmo `authenticated` pra todos", () => {
+    const erro = negadoComoUsuario(
+      GOV_ADMIN,
+      `insert into public.recuperacao_config (organization_id, base_legal) values ('${GOV_ORG}', 'consent')`,
+    );
+    expect(erro).toContain("permission denied for table recuperacao_config");
+  });
+
+  it("a linha só existe porque o SERVIDOR (service_role) a grava — semeada direto, bypassando RLS", () => {
+    sql(`insert into public.recuperacao_config (organization_id, base_legal) values ('${GOV_ORG}', 'consent');`);
     expect(contarComoPostgres(`organization_id = '${GOV_ORG}'`)).toBe(1);
   });
 
   it("viewer LÊ a própria organização — a policy de select não tem gate de papel", () => {
-    expect(countAs(GOV_VIEWER, `select count(*) from public.recuperacao_config where organization_id = '${GOV_ORG}';`)).toBe(1);
+    expect(
+      countAs(GOV_VIEWER, `select count(*) from public.recuperacao_config where organization_id = '${GOV_ORG}';`),
+    ).toBe(1);
   });
 
-  it("viewer NÃO altera a linha existente (UPDATE recusado, 0 linhas, sem erro)", () => {
-    const linhas = writeCountAs(
-      GOV_VIEWER,
-      `update public.recuperacao_config set mensagem = 'tentativa viewer' where organization_id = '${GOV_ORG}'`,
-    );
-    expect(linhas).toBe(0);
-    expect(mensagemAtual(GOV_ORG)).toBe("");
-  });
-
-  it("CONTROLE POSITIVO: admin (acima de manager) continua escrevendo", () => {
-    const linhas = writeCountAs(
-      GOV_ADMIN,
-      `update public.recuperacao_config set mensagem = 'ok admin' where organization_id = '${GOV_ORG}'`,
-    );
-    expect(linhas).toBe(1);
-    expect(mensagemAtual(GOV_ORG)).toBe("ok admin");
+  it("CONTROLE POSITIVO: admin também lê (a policy de select vale pra todo papel do tenant)", () => {
+    expect(
+      countAs(GOV_ADMIN, `select count(*) from public.recuperacao_config where organization_id = '${GOV_ORG}';`),
+    ).toBe(1);
   });
 
   it("organização vizinha não LÊ a linha do GOV_ORG (zero linhas, sem erro)", () => {
@@ -143,13 +162,13 @@ describe("A — RLS de recuperacao_config (0417)", () => {
     ).toBe(0);
   });
 
-  it("organização vizinha não ESCREVE na linha do GOV_ORG (manager alheio não basta)", () => {
-    const linhas = writeCountAs(
+  it("organização vizinha também não escreve — o mesmo GRANT vale pra ela", () => {
+    const erro = negadoComoUsuario(
       VIZINHA_MANAGER,
       `update public.recuperacao_config set mensagem = 'invasão' where organization_id = '${GOV_ORG}'`,
     );
-    expect(linhas, "manager de OUTRA organização alterou a config do GOV_ORG").toBe(0);
-    expect(mensagemAtual(GOV_ORG)).toBe("ok admin");
+    expect(erro).toContain("permission denied for table recuperacao_config");
+    expect(sql(`select mensagem from public.recuperacao_config where organization_id = '${GOV_ORG}';`)).toBe("");
   });
 });
 
