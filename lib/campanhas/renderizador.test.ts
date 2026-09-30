@@ -77,4 +77,28 @@ describe("renderizador da campanha", () => {
     const r = renderizar("{{constructor.name}} {{__proto__}}", { nome: "Ana" });
     expect(r.texto).toBe("{{constructor.name}} {{__proto__}}");
   });
+
+  describe("variáveis de recuperação (dias_sem_pedir, ultimo_pedido)", () => {
+    it("substitui as duas quando presentes", () => {
+      const r = renderizar("Já são {{dias_sem_pedir}} dias! Da última vez: {{ultimo_pedido}}.", {
+        nome: "Ana",
+        diasSemPedir: 42,
+        ultimoPedido: "2x Pizza (R$ 50,00, em 01/01/2026)",
+      });
+      expect(r.texto).toBe("Já são 42 dias! Da última vez: 2x Pizza (R$ 50,00, em 01/01/2026).");
+      expect(r.faltando).toEqual([]);
+    });
+
+    it("sem valor (campanha comum, não é recuperação) vira FALTANDO, nunca '0' nem vazio", () => {
+      const r = renderizar("{{dias_sem_pedir}} dias sem pedir. {{ultimo_pedido}}", { nome: "Ana" });
+      expect(r.faltando.sort()).toEqual(["dias_sem_pedir", "ultimo_pedido"]);
+      expect(r.texto).toBe("{{dias_sem_pedir}} dias sem pedir. {{ultimo_pedido}}");
+    });
+
+    it("dias_sem_pedir=0 é um valor válido, não falta", () => {
+      const r = renderizar("{{dias_sem_pedir}}", { nome: "Ana", diasSemPedir: 0 });
+      expect(r.texto).toBe("0");
+      expect(r.faltando).toEqual([]);
+    });
+  });
 });

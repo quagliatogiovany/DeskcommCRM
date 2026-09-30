@@ -92,12 +92,14 @@ async function classificar(
     corpo: string;
     agora: Date;
     campanhaId?: string;
+    extraPorContato?: ReadonlyMap<string, { diasSemPedir?: number | null; ultimoPedido?: string | null }>;
   },
 ) {
   const candidatos = await buscarCandidatos(admin, {
     organizationId: entrada.organizationId,
     filtro: entrada.filtro,
     agora: entrada.agora,
+    extraPorContato: entrada.extraPorContato,
   });
   const jaEmCampanha = await contatosJaEmCampanha(
     admin,
@@ -113,7 +115,11 @@ async function classificar(
     // A saudação NÃO é resolvida aqui: ela é da hora do envio. O token fica no
     // corpo congelado e o despacho o troca — ver `rodada.ts`.
     renderizar: (c: CandidatoDaAudiencia) => {
-      const r = renderizar(entrada.corpo, { nome: c.nome });
+      const r = renderizar(entrada.corpo, {
+        nome: c.nome,
+        diasSemPedir: c.extra?.diasSemPedir ?? null,
+        ultimoPedido: c.extra?.ultimoPedido ?? null,
+      });
       return { texto: r.texto, faltando: r.faltando };
     },
   });
@@ -132,6 +138,7 @@ export async function prepararCampanha(
     corpo: string;
     contentVersion: number;
     agora: Date;
+    extraPorContato?: ReadonlyMap<string, { diasSemPedir?: number | null; ultimoPedido?: string | null }>;
   },
 ): Promise<ResumoDoSnapshot> {
   const filtro = filtroDeAudienciaSchema.safeParse(entrada.filtro);
@@ -145,6 +152,7 @@ export async function prepararCampanha(
     corpo: entrada.corpo,
     agora: entrada.agora,
     campanhaId: entrada.campanhaId,
+    extraPorContato: entrada.extraPorContato,
   });
 
   // Reconstrução limpa: a rota só chega aqui quando nada saiu, então apagar a
@@ -169,7 +177,13 @@ export async function prepararCampanha(
     exclusion_reason: l.motivo,
     rendered_body: l.corpo,
     content_version: entrada.contentVersion,
-    variables: { nome: l.candidato.nome },
+    variables: l.candidato.extra
+      ? {
+          nome: l.candidato.nome,
+          diasSemPedir: l.candidato.extra.diasSemPedir ?? null,
+          ultimoPedido: l.candidato.extra.ultimoPedido ?? null,
+        }
+      : { nome: l.candidato.nome },
     cancelled_at: null,
     created_at: agoraIso,
   }));

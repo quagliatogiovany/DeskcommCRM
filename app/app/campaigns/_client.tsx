@@ -40,6 +40,9 @@ export function ListaDeCampanhas() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
         <Button variant="outline" asChild>
+          <Link href="/app/campaigns/recuperacao">{t("Recuperação")}</Link>
+        </Button>
+        <Button variant="outline" asChild>
           <Link href="/app/campaigns/settings">{t("Configuração")}</Link>
         </Button>
         <Button asChild>

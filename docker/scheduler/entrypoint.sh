@@ -100,6 +100,12 @@ CRONS="
 # no dia errado metade do mundo e de madrugada boa parte do resto. Barato: quem
 # não configurou a automação não chega a ser varrido.
 7 * * * *|60|api/v1/cron/contact-birthdays
+# RECUPERAÇÃO DE CLIENTES INATIVOS. Mesma cadência e mesmo motivo do aniversário:
+# de hora em hora, e quem decide o momento é o relógio de parede de CADA
+# organização — a rodada só abre naquela cuja hora configurada bateu. Minuto
+# próprio pra não disputar a mesma batida das outras varreduras horárias.
+# Organização com `recorrencia: 'manual'` nunca é varrida aqui.
+43 * * * *|60|api/v1/cron/recuperacao-clientes
 # A DATA DO FUNIL (#989). Mesma cadência e mesmo motivo do aniversário: de hora
 # em hora, e quem decide o momento é o relógio de parede de CADA organização —
 # a rodada só age naquela que marca a hora da varredura. Minuto diferente do

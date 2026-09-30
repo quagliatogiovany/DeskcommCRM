@@ -60,6 +60,8 @@ export function motivoParaExcluir(c: ContatoParaDecidir): MotivoDeExclusao | nul
 /** Um candidato do recorte, já lido do banco. */
 export interface CandidatoDaAudiencia extends ContatoParaDecidir {
   nome: string | null;
+  /** Só em campanha de recuperação — dado que vem do Nodus, não do recorte genérico. */
+  extra?: { diasSemPedir?: number | null; ultimoPedido?: string | null };
 }
 
 export interface LinhaClassificada {

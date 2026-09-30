@@ -235,6 +235,13 @@ export const ApiErrorCodes = {
   campanha_conteudo_invalido: "campanha_conteudo_invalido", // 422: texto vazio ou variável que não existe
   campanha_base_legal_invalida: "campanha_base_legal_invalida", // 422: interesse legítimo sem referência da LIA
 
+  // ─── Módulo RECUPERAÇÃO DE CLIENTES (migration 0417) ───
+  recuperacao_config_invalida: "recuperacao_config_invalida", // 422: zod recusou o corpo
+  recuperacao_nao_configurada: "recuperacao_nao_configurada", // 409: sem linha em recuperacao_config, ou `ativo=false`
+  recuperacao_nao_configurada_no_nodus: "recuperacao_nao_configurada_no_nodus", // 409: organização sem nodus_api_key
+  recuperacao_sem_inativos: "recuperacao_sem_inativos", // 422: nenhum contato inativo agora
+  recuperacao_rodada_ja_aberta_hoje: "recuperacao_rodada_ja_aberta_hoje", // 409: unique (org, rodada_data)
+
   // 500 / upstream
   internal_error: "internal_error",
   upstream_unavailable: "upstream_unavailable",

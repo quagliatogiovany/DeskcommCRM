@@ -30,7 +30,13 @@
 import { horaNoFuso } from "./relogio";
 
 /** As variáveis que existem. Oferecer uma que não resolve é prometer dado que não há. */
-export const VARIAVEIS_DA_CAMPANHA = ["nome", "primeiro_nome", "saudacao"] as const;
+export const VARIAVEIS_DA_CAMPANHA = [
+  "nome",
+  "primeiro_nome",
+  "saudacao",
+  "dias_sem_pedir",
+  "ultimo_pedido",
+] as const;
 
 export type VariavelDaCampanha = (typeof VARIAVEIS_DA_CAMPANHA)[number];
 
@@ -39,11 +45,16 @@ export const DESCRICAO_DA_VARIAVEL: Record<VariavelDaCampanha, string> = {
   nome: "Nome do contato, como está no cadastro",
   primeiro_nome: "Só a primeira palavra do nome",
   saudacao: "Bom dia / Boa tarde / Boa noite, na hora do envio",
+  dias_sem_pedir: "Quantos dias sem pedir (só em campanha de recuperação)",
+  ultimo_pedido: "Itens do último pedido (só em campanha de recuperação)",
 };
 
 /** Os valores congelados no snapshot. `saudacao` não entra: ela é da hora do envio. */
 export interface ValoresDoDestinatario {
   nome: string | null;
+  /** Só presente em campanha de recuperação — vem do Nodus na abertura da rodada. */
+  diasSemPedir?: number | null;
+  ultimoPedido?: string | null;
 }
 
 const TOKEN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
@@ -83,6 +94,15 @@ export function renderizar(
         // aquela. A prévia mostra `{{saudacao}}`; o envio resolve.
         if (!quando) return literal;
         return saudacaoDaHora(quando.agora, quando.fuso);
+      }
+      case "dias_sem_pedir": {
+        if (valores.diasSemPedir == null) return marcarFalta(faltando, "dias_sem_pedir", literal);
+        return String(valores.diasSemPedir);
+      }
+      case "ultimo_pedido": {
+        const texto = (valores.ultimoPedido ?? "").trim();
+        if (texto === "") return marcarFalta(faltando, "ultimo_pedido", literal);
+        return texto;
       }
       default:
         desconhecidas.add(bruto);

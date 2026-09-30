@@ -16,7 +16,7 @@ import type { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
-import { FILTRO_VAZIO } from "@/lib/campanhas/audiencia";
+import { criarCampanha } from "@/lib/campanhas/criar";
 import { gravarPool } from "@/lib/campanhas/pool-de-numeros";
 import {
   codificarCursor,
@@ -128,29 +128,24 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { data, error } = await supabase
-    .from("campaigns")
-    .insert({
-      organization_id: org.orgId,
-      name: entrada.name,
-      description: entrada.description ?? null,
-      channel_session_id: entrada.channel_session_id,
-      message_body: entrada.message_body ?? null,
-      base_legal: entrada.base_legal,
-      lia_ref: entrada.lia_ref ?? null,
-      audience_filter: entrada.audience_filter ?? FILTRO_VAZIO,
-      intervalo_segundos: entrada.intervalo_segundos ?? null,
-      janela_inicio_hora: entrada.janela_inicio_hora ?? null,
-      janela_fim_hora: entrada.janela_fim_hora ?? null,
-      teto_diario: entrada.teto_diario ?? null,
-      teto_horario: entrada.teto_horario ?? null,
-      pipeline_id: entrada.pipeline_id ?? null,
-      stage_id: entrada.stage_id ?? null,
-      agent_id: entrada.agent_id ?? null,
-      created_by: user.id,
-    })
-    .select(COLUNAS_DA_LISTA)
-    .single();
+  const { data, error } = await criarCampanha(supabase, org.orgId, {
+    name: entrada.name,
+    description: entrada.description,
+    channelSessionId: entrada.channel_session_id,
+    messageBody: entrada.message_body,
+    baseLegal: entrada.base_legal,
+    liaRef: entrada.lia_ref,
+    audienceFilter: entrada.audience_filter,
+    intervaloSegundos: entrada.intervalo_segundos,
+    janelaInicioHora: entrada.janela_inicio_hora,
+    janelaFimHora: entrada.janela_fim_hora,
+    tetoDiario: entrada.teto_diario,
+    tetoHorario: entrada.teto_horario,
+    pipelineId: entrada.pipeline_id,
+    stageId: entrada.stage_id,
+    agentId: entrada.agent_id,
+    createdBy: user.id,
+  });
   if (error || !data) {
     return fail("internal_error", error?.message ?? t("Não foi possível criar a campanha."), 500, {
       requestId,

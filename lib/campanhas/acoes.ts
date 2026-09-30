@@ -129,6 +129,7 @@ export async function prepararAcao(
   admin: SupabaseClient,
   c: CampanhaCarregada,
   agora: Date,
+  extraPorContato?: ReadonlyMap<string, { diasSemPedir?: number | null; ultimoPedido?: string | null }>,
 ): Promise<Desfecho<{ resumo: { total: number; elegiveis: number; excluidos: number } }>> {
   const recusa = recusaDeTransicao(c.status, "preparing") ?? faltaParaEnviar(c);
   if (recusa) return recusa;
@@ -165,6 +166,7 @@ export async function prepararAcao(
       corpo: c.message_body ?? "",
       contentVersion: c.content_version,
       agora,
+      extraPorContato,
     });
     if (resumo.total === 0) {
       await voltarAoRascunho(admin, c.id, "audiencia_vazia");

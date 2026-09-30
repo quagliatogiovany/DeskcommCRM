@@ -184,6 +184,7 @@ interface DestinatarioRow {
   contact_id: string;
   recipient_address: string | null;
   rendered_body: string | null;
+  variables: { diasSemPedir?: number | null; ultimoPedido?: string | null } | null;
   contacts: {
     id: string;
     name: string | null;
@@ -203,7 +204,7 @@ async function rodarUmaCampanha(
   const { data: fila } = await admin
     .from("campaign_recipients")
     .select(
-      "id, contact_id, recipient_address, rendered_body, " +
+      "id, contact_id, recipient_address, rendered_body, variables, " +
         "contacts(id, name, display_name, phone_number, is_blocked, is_anonymized, consent)",
     )
     .eq("campaign_id", campanha.id)
@@ -402,7 +403,11 @@ async function rodarUmaCampanha(
   const congelado = alvo.rendered_body ?? campanha.message_body ?? "";
   const corpo = renderizar(
     congelado,
-    { nome: nomeDoContato(contato) },
+    {
+      nome: nomeDoContato(contato),
+      diasSemPedir: alvo.variables?.diasSemPedir ?? null,
+      ultimoPedido: alvo.variables?.ultimoPedido ?? null,
+    },
     { agora, fuso: knobs.timezone },
   ).texto;
 

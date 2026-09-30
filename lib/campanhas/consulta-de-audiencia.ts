@@ -32,9 +32,15 @@ interface LinhaDeContato {
 
 export async function buscarCandidatos(
   admin: SupabaseClient,
-  entrada: { organizationId: string; filtro: FiltroDeAudiencia; agora: Date },
+  entrada: {
+    organizationId: string;
+    filtro: FiltroDeAudiencia;
+    agora: Date;
+    /** Só em campanha de recuperação — dado do Nodus por `contact_id`. */
+    extraPorContato?: ReadonlyMap<string, { diasSemPedir?: number | null; ultimoPedido?: string | null }>;
+  },
 ): Promise<CandidatoDaAudiencia[]> {
-  const { organizationId, filtro, agora } = entrada;
+  const { organizationId, filtro, agora, extraPorContato } = entrada;
 
   // ─── Os contatos que têm negócio no recorte ───
   // Consulta separada, e não `join` embutido do PostgREST: o mesmo contato tem N
@@ -124,6 +130,7 @@ export async function buscarCandidatos(
     bloqueado: l.is_blocked,
     anonimizado: l.is_anonymized,
     recusouMarketing: recusouMarketing(l.consent),
+    extra: extraPorContato?.get(l.id),
   }));
 }
 
