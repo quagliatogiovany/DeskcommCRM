@@ -899,6 +899,14 @@ export const AUDIT_ACTIONS = [
   // sessão nem `actor_user_id` ainda quando isso acontece.
   "auth.sso_login",
   "auth.sso_login_failed",
+  // Recuperação de clientes inativos (campanha sobre contatos que o Nodus
+  // diz estar sem pedir há N dias): a config que o dono edita, o disparo
+  // manual pela tela e a rodada aberta sozinha pelo cron horário — três
+  // linhas porque cada uma responde "quem mexeu" de um jeito diferente
+  // (usuário vs. ninguém, na abertura automática).
+  "recuperacao_config.updated",
+  "recuperacao.disparada",
+  "recuperacao.disparada_pelo_cron",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
