@@ -35,6 +35,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { camposDoFunil, settingsDoEmbed } from "@/lib/leads/campos-do-funil";
 import { createClient } from "@/lib/supabase/server";
 import { nomesDosAtendentes } from "@/lib/users/nome-do-atendente";
+import { buscarFichaCliente } from "@/lib/nodus/ficha-cliente";
 
 export const dynamic = "force-dynamic";
 
@@ -89,7 +90,7 @@ export async function GET(
   }
 
   const { data: contactScope, error: scopeError } = await supabase.from("contacts")
-    .select("organization_id, is_anonymized").eq("id", contactId).maybeSingle();
+    .select("organization_id, is_anonymized, phone_number").eq("id", contactId).maybeSingle();
   if (scopeError) return fail("internal_error", scopeError.message, 500, { requestId });
   if (!contactScope) return fail("not_found", "Contato não encontrado.", 404, { requestId });
   // Candidates are worker-only. Authorize the contact through RLS first, then
@@ -111,6 +112,10 @@ export async function GET(
       return { enrichment: null, enrichment_error: true };
     }
   })();
+  const nodus = contactScope.is_anonymized || !contactScope.phone_number
+    ? { ficha: null, erro: false }
+    : await buscarFichaCliente(createAdminClient(), contactScope.organization_id, contactScope.phone_number);
+
   const [leads, orders, activities, demandas, fatos, historico] = await Promise.all([
     supabase
       .from("crm_leads")
@@ -181,6 +186,8 @@ export async function GET(
       })),
       demandas: demandas.data ?? [],
       fatos: fatos.data ?? [], historico: historico.data ?? [],
+      nodus: nodus.ficha,
+      nodus_error: nodus.erro,
     },
     { requestId },
   );

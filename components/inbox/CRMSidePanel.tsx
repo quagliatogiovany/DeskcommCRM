@@ -3,6 +3,7 @@
 import { RoteirosDoContato } from "@/components/contacts/RoteirosDoContato";
 import { LeadEnrichment } from "./LeadEnrichment";
 import type { ProspectEnrichment } from "@/lib/prospecting/schema";
+import type { FichaClienteNodus } from "@/lib/nodus/ficha-cliente";
 import { useAuth } from "@/hooks/auth/AuthProvider";
 import { useLocaleDeData } from "@/hooks/i18n/useLocaleDeData";
 
@@ -242,6 +243,11 @@ function MarcarProximoPasso({ demandaId, onPronto }: { demandaId: string; onPron
   );
 }
 
+/** A ficha do Nodus vem em reais, não em centavos (é outro sistema, outra unidade). */
+function formatReais(valor: number): string {
+  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 function formatMoney(cents: number | null, currency: string | null): string {
   if (cents == null) return "—";
   const cur = currency ?? "BRL";
@@ -479,6 +485,8 @@ export function CRMSidePanel({ conversation }: Props) {
   const [demandas, setDemandas] = useState<DemandaRow[] | null>(null);
   const [fatos, setFatos] = useState<Array<{ id: string; headline: string; body: string }>>([]);
   const [historico, setHistorico] = useState<Array<{ id: string; desfecho: string; fechada_em: string }>>([]);
+  const [nodus, setNodus] = useState<FichaClienteNodus | null>(null);
+  const [nodusErro, setNodusErro] = useState(false);
   const [summaryContactId, setSummaryContactId] = useState<string | null>(null);
   /**
    * O TERCEIRO ESTADO. Antes existiam dois — carregando e "tem N itens" — e a
@@ -508,6 +516,7 @@ export function CRMSidePanel({ conversation }: Props) {
       setActivities(null);
       setDemandas(null);
       setFatos([]); setHistorico([]);
+      setNodus(null); setNodusErro(false);
       setLeadAtivoId(null);
       return;
     }
@@ -530,6 +539,8 @@ export function CRMSidePanel({ conversation }: Props) {
             demandas: DemandaRow[];
             fatos?: Array<{ id: string; headline: string; body: string }>;
             historico?: Array<{ id: string; desfecho: string; fechada_em: string }>;
+            nodus?: FichaClienteNodus | null;
+            nodus_error?: boolean;
           };
         }>(`/api/v1/contacts/${contactId}/crm-summary`);
         if (cancelled) return;
@@ -545,6 +556,8 @@ export function CRMSidePanel({ conversation }: Props) {
         // que é o caso saudável.
         setDemandas(r.data.demandas ?? []);
         setFatos(r.data.fatos ?? []); setHistorico(r.data.historico ?? []);
+        setNodus(r.data.nodus ?? null);
+        setNodusErro(r.data.nodus_error ?? false);
       } catch {
         if (cancelled) return;
         // Falha NÃO vira lista vazia. Os dados ficam `null` e o painel diz que
@@ -555,6 +568,7 @@ export function CRMSidePanel({ conversation }: Props) {
         setActivities(null);
         setDemandas(null);
         setFatos([]); setHistorico([]);
+        setNodus(null); setNodusErro(false);
       }
     }
 
@@ -658,6 +672,57 @@ export function CRMSidePanel({ conversation }: Props) {
           {tagEditorOpen && contactId && <ContactTagsEditor contactId={contactId} orgId={conversation.organization_id} tags={tags} />}
         </Card>
       </section>
+
+      {contact?.phone_number && (
+        <section data-testid="inbox-nodus">
+          <h3 className="text-xs font-semibold text-text">{t("Loja (Nodus)")}</h3>
+          {sectionsLoading ? (
+            <Skeleton className="mt-2 h-14 w-full" />
+          ) : nodus ? (
+            <Card className="mt-2 space-y-1.5 p-3 text-xs">
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">{t("Código de indicação")}</span>
+                <span className="font-medium">{nodus.referralCode ?? "—"}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">{t("Crédito disponível")}</span>
+                <span className="font-medium">{formatReais(nodus.creditoDisponivel)}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">{t("Total de pedidos")}</span>
+                <span className="font-medium">{nodus.totalPedidos}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-muted-foreground">{t("Sem pedir há")}</span>
+                <span className="font-medium">
+                  {nodus.diasSemPedir != null ? `${nodus.diasSemPedir} ${t("dias")}` : "—"}
+                </span>
+              </div>
+              {nodus.endereco && (
+                <div className="flex justify-between gap-2">
+                  <span className="shrink-0 text-muted-foreground">{t("Endereço")}</span>
+                  <span className="text-right font-medium">{nodus.endereco}</span>
+                </div>
+              )}
+              {nodus.ultimoPedido && (
+                <div className="mt-1 rounded-md border border-border p-2">
+                  <div className="font-medium">
+                    {formatReais(nodus.ultimoPedido.total)} · {nodus.ultimoPedido.status}
+                  </div>
+                  <div className="text-muted-foreground">{nodus.ultimoPedido.itens}</div>
+                  <div className="text-muted-foreground">{shortDate(nodus.ultimoPedido.data, localeDaData)}</div>
+                </div>
+              )}
+            </Card>
+          ) : (
+            <SemLista
+              vazio="Não é cliente da loja no Nodus."
+              erro={nodusErro}
+              onTentarDeNovo={() => setTentativa((n) => n + 1)}
+            />
+          )}
+        </section>
+      )}
 
       <LeadEnrichment
         data={summaryContactId === contactId && !erro && !contact?.is_anonymized ? enrichment : null}
