@@ -146,3 +146,19 @@ export function saudacaoDaHora(agora: Date, fuso: string): string {
   if (hora < 18) return "Boa tarde";
   return "Boa noite";
 }
+
+/**
+ * Variantes da mensagem: o operador separa textos alternativos com uma linha
+ * contendo só `---`. Cada envio sorteia UMA — o mesmo texto para todo mundo é o
+ * padrão que o WhatsApp mais penaliza. Escolhido no envio (como a saudação), não
+ * na preparação: o snapshot guarda o corpo inteiro e o rodízio fica por conta de
+ * quem despacha.
+ */
+export function escolherVariante(corpo: string, sorteio: () => number = Math.random): string {
+  const variantes = corpo
+    .split(/\r?\n[ \t]*---[ \t]*\r?\n/)
+    .map((v) => v.trim())
+    .filter((v) => v !== "");
+  if (variantes.length <= 1) return corpo;
+  return variantes[Math.floor(sorteio() * variantes.length)] ?? corpo;
+}

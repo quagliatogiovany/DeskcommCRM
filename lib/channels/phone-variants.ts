@@ -26,6 +26,21 @@ function digitsOf(raw: string): string {
 }
 
 /**
+ * Aceita o que a pessoa digita: `+55 (48) 99999-0000`, `5548999990000` ou só
+ * `48999990000` (DDD + número) e devolve E.164 com `+`. Com `+` explícito, é
+ * número de qualquer país e fica como veio.
+ */
+export function normalizarTelefoneDigitado(raw: string): string {
+  const t = raw.trim();
+  const d = digitsOf(t);
+  if (!d) return t;
+  if (t.startsWith("+")) return `+${d}`;
+  if (d.length === 10 || d.length === 11) return `+55${d}`;
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return `+${d}`;
+  return t;
+}
+
+/**
  * Formas pelas quais este número pode estar gravado. A primeira é sempre a original;
  * a segunda (quando existe) é a contraparte com/sem o nono dígito.
  *

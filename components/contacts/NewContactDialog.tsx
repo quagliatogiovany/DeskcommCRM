@@ -110,10 +110,10 @@ export function NewContactDialog({ open, onOpenChange, nomeInicial, onCriado }: 
             <Input id="email" type="email" {...form.register("email")} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone_number">{t("Telefone (E.164)")}</Label>
+            <Label htmlFor="phone_number">{t("Telefone (com DDD)")}</Label>
             <Input
               id="phone_number"
-              placeholder="+5511999998888"
+              placeholder="11999998888"
               {...form.register("phone_number")}
             />
           </div>

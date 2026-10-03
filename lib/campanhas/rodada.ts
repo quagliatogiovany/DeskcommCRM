@@ -45,7 +45,7 @@ import { logger } from "@/lib/logger";
 
 import { motivoParaExcluir, recusouMarketing } from "./elegibilidade";
 import { hashDoEndereco } from "./exclusoes";
-import { renderizar } from "./renderizador";
+import { escolherVariante, renderizar } from "./renderizador";
 import { escolherNumero, poolDaCampanha, type NumeroDisponivel } from "./rodizio";
 import { podeMandarAgora, proximaTentativa, type RitmoDaCampanha } from "./ritmo";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
@@ -400,7 +400,7 @@ async function rodarUmaCampanha(
   // de ser a do instante em que a mensagem SAI, no fuso do canal. Montá-la na
   // preparação produziria "bom dia" numa mensagem enviada à tarde — foi o
   // defeito do primeiro piloto.
-  const congelado = alvo.rendered_body ?? campanha.message_body ?? "";
+  const congelado = escolherVariante(alvo.rendered_body ?? campanha.message_body ?? "");
   const corpo = renderizar(
     congelado,
     {

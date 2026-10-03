@@ -24,7 +24,7 @@ import { baseLegalValida, motivoParaExcluir, recusouMarketing } from "./elegibil
 import { ehStatusDaCampanha, podeTransitar } from "./maquina-de-estados";
 import { prepararCampanha } from "./preparacao";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
-import { renderizar } from "./renderizador";
+import { escolherVariante, renderizar } from "./renderizador";
 import type { StatusDaCampanha } from "./tipos";
 
 export interface CampanhaCarregada {
@@ -432,7 +432,7 @@ export async function testarAcao(
   }
 
   const render = renderizar(
-    c.message_body ?? "",
+    escolherVariante(c.message_body ?? ""),
     { nome: nomeDoContato(linha) },
     { agora, fuso },
   );

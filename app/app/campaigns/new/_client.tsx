@@ -351,6 +351,9 @@ export function NovaCampanha() {
           placeholder={t("Escreva como você falaria com uma pessoa só.")}
           aria-label={t("Texto da mensagem")}
         />
+        <p className="text-sm text-muted-foreground">
+          {t("Quer variar o texto? Escreva outras versões separadas por uma linha só com --- . Cada envio sorteia uma.")}
+        </p>
         <div className="space-y-1 text-sm text-muted-foreground">
           <p>{t("Você pode usar:")}</p>
           <ul className="space-y-1">

@@ -9,7 +9,8 @@
  */
 import { z } from "zod";
 
-import { normalizarTag, normalizarTags } from "@/lib/contacts/tag-normalizada";
+import { normalizarTelefoneDigitado } from "@/lib/channels/phone-variants";
+import { normalizarTag,normalizarTags } from "@/lib/contacts/tag-normalizada";
 import { isValidCpf, type PerfilDoPais } from "@/lib/legal/perfil-do-pais";
 
 const PHONE_REGEX = /^\+\d{8,15}$/;
@@ -43,7 +44,8 @@ export const contactCreateSchema = z.object({
   email: z.string().email().optional(),
   phone_number: z
     .string()
-    .regex(PHONE_REGEX, "Telefone deve estar em formato E.164 (+5511999998888)")
+    .transform(normalizarTelefoneDigitado)
+    .pipe(z.string().regex(PHONE_REGEX, "Telefone inválido. Use DDD + número (ex.: 48999990000) ou +55…"))
     .optional(),
   cpf: z.string().refine(isValidCpf, "CPF inválido").optional(),
   birthdate: z
