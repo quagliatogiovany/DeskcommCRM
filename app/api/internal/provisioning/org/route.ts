@@ -23,6 +23,8 @@ import { slugify } from "@/lib/auth/provision";
 import { audit } from "@/lib/audit";
 import { ok, fail } from "@/lib/api/wrappers";
 import { env } from "@/lib/env";
+import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -108,4 +110,79 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return ok({ organization_id: org.id, slug: org.slug }, { status: 201 });
+}
+
+const deleteSchema = z.object({ organization_id: z.string().uuid() });
+
+// Tabelas que apontam pra channel_sessions/organizations com ON DELETE RESTRICT:
+// o Postgres recusaria o delete da org enquanto existirem. Ordem = dependentes antes.
+const TABELAS_RESTRICT = ["voice_calls", "messages", "conversations", "ai_agent_versions"] as const;
+
+/**
+ * DELETE /api/internal/provisioning/org — o Nodus excluiu a loja e pede a
+ * limpeza TOTAL da organização correspondente. Irreversível; idempotente
+ * (org inexistente = 200).
+ *
+ *  1. Desconecta (logout) e apaga as sessões WAHA da org. Falha fechado: sem
+ *     WAHA configurado ou se o WAHA recusar, nada é apagado (senão a sessão
+ *     ficaria órfã recebendo webhook de uma org que não existe).
+ *  2. Apaga o histórico que referencia canais com RESTRICT.
+ *  3. Apaga a organização (o resto cascateia).
+ */
+export async function DELETE(req: NextRequest): Promise<Response> {
+  if (!authorize(req)) {
+    return fail("unauthenticated", "Internal secret missing or invalid.", 401);
+  }
+  const raw = await req.json().catch(() => null);
+  const parsed = deleteSchema.safeParse(raw);
+  if (!parsed.success) {
+    return fail("validation_failed", "organization_id inválido.", 422);
+  }
+  const orgId = parsed.data.organization_id;
+  const admin = createAdminClient();
+
+  const { data: sessions, error: sessErr } = await admin
+    .from("channel_sessions")
+    .select("id, provider, waha_session_name")
+    .eq("organization_id", orgId);
+  if (sessErr) return fail("internal_error", `channel_sessions read failed: ${sessErr.message}`, 500);
+
+  const wahaNames = (sessions ?? [])
+    .filter((s) => s.provider === CHANNEL_PROVIDER_WAHA && s.waha_session_name)
+    .map((s) => s.waha_session_name as string);
+
+  if (wahaNames.length > 0) {
+    const waha = getWahaClient();
+    if (!waha) {
+      return fail("waha_not_configured", "WAHA não configurado — sessões não podem ser removidas.", 503);
+    }
+    for (const name of wahaNames) {
+      try {
+        await waha.logoutSession(name);
+        await waha.deleteSession(name);
+      } catch (err) {
+        return fail("waha_error", `Falha ao remover sessão WAHA ${name}: ${wahaFriendlyError(err)}`, 502);
+      }
+    }
+  }
+
+  for (const table of TABELAS_RESTRICT) {
+    const { error } = await admin.from(table).delete().eq("organization_id", orgId);
+    if (error) return fail("internal_error", `${table} delete failed: ${error.message}`, 500);
+  }
+
+  const { error } = await admin.from("organizations").delete().eq("id", orgId);
+  if (error) {
+    return fail("internal_error", `org delete failed: ${error.message}`, 500);
+  }
+
+  void audit({
+    action: "tenant.deleted_by_provisioning_api",
+    organizationId: orgId,
+    resourceType: "organization",
+    resourceId: orgId,
+    bypassedRls: true,
+    metadata: { source: "nodus", waha_sessions: wahaNames.length },
+  });
+  return ok({ deleted: true, waha_sessions_removed: wahaNames.length });
 }
