@@ -2,7 +2,7 @@
  * O INSERT da campanha — extraído da rota `POST /api/v1/campaigns` pra ter um
  * segundo consumidor: `lib/recuperacao/abrir-rodada.ts` abre campanha de
  * recuperação pelo mesmo caminho, com `origem` e `rodada_data` a mais
- * (migration 0417). Nenhuma validação de entrada mora aqui — quem chama já
+ * (migration 0559). Nenhuma validação de entrada mora aqui — quem chama já
  * validou (a rota via `criarCampanhaSchema`; a recuperação via
  * `recuperacaoConfigSchema` e dado já resolvido do Nodus).
  */
@@ -33,7 +33,7 @@ export interface DadosDaCampanha {
   agentId?: string | null;
   /** `null`/omitido = 'manual', o comportamento de toda campanha criada pela tela. */
   origem?: "manual" | "recuperacao";
-  /** Obrigatório junto de `origem: 'recuperacao'` — é a chave da unicidade diária (migration 0417). */
+  /** Obrigatório junto de `origem: 'recuperacao'` — é a chave da unicidade diária (migration 0559). */
   rodadaData?: string | null;
   /** `null` para campanha aberta pelo cron de recuperação — não há usuário. */
   createdBy: string | null;

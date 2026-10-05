@@ -1,6 +1,6 @@
 /**
  * GET /api/v1/metrics/leads-por-horario — heatmap de dia-da-semana × hora em
- * que o lead entra em contato (migration 0418).
+ * que o lead entra em contato (migration 0560).
  *
  * Escopo = a PRÓPRIA RLS, igual às rotas irmãs: `fn_leads_por_horario` é
  * SECURITY INVOKER e roda com o client de sessão, então `messages`/

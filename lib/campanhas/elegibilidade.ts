@@ -24,6 +24,7 @@
  * registrada que `lib/automation/guarda-do-contato.ts` já respeita no resto do
  * produto. A campanha não cria régua concorrente: lê as que existem.
  */
+import type { CamposPersonalizados } from "./renderizador";
 import type { MotivoDeExclusao } from "./tipos";
 
 /** O que se sabe do destinatário na hora de decidir. Nada além disto importa. */
@@ -62,6 +63,15 @@ export interface CandidatoDaAudiencia extends ContatoParaDecidir {
   nome: string | null;
   /** Só em campanha de recuperação — dado que vem do Nodus, não do recorte genérico. */
   extra?: { diasSemPedir?: number | null; ultimoPedido?: string | null };
+  /**
+   * Campos personalizados que o TEXTO usa — `{{lead.gancho}}`,
+   * `{{contato.link_previa}}`. Só entram quando o corpo pede (ver
+   * `consulta-de-audiencia.ts`): sem eles o renderizador marca FALTA e a pessoa
+   * sai da lista com `variavel_ausente`, que é a MESMA regra de `{{nome}}` sem
+   * nome no cadastro.
+   */
+  lead?: CamposPersonalizados | null;
+  contato?: CamposPersonalizados | null;
 }
 
 export interface LinhaClassificada {

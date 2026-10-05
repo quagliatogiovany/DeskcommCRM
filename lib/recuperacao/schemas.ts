@@ -1,6 +1,6 @@
 /**
  * O que a tela de Recuperação manda pra `PUT /api/v1/recuperacao/config`.
- * As faixas espelham os CHECK da migration 0417 — validação de entrada, não
+ * As faixas espelham os CHECK da migration 0559 — validação de entrada, não
  * comportamento (a fonte única do comportamento é o banco).
  */
 import { z } from "zod";

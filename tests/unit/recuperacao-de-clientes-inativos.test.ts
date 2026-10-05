@@ -45,7 +45,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const MIGRACAO = "supabase/migrations/20260929200000_0417_recuperacao_de_clientes.sql";
+const MIGRACAO = "supabase/migrations/20260929200000_0559_recuperacao_de_clientes.sql";
 const ler = (caminho: string): string => readFileSync(join(process.cwd(), caminho), "utf8");
 
 const migration = ler(MIGRACAO);
@@ -119,7 +119,7 @@ describe("recuperação de clientes inativos (0417)", () => {
   it("a tripla existe: migration versionada, apêndice no baseline e linha no MANIFEST", () => {
     expect(existsSync(join(process.cwd(), MIGRACAO))).toBe(true);
     expect(apendice, "apêndice da 0417 ausente do baseline.sql").toBeGreaterThan(-1);
-    expect(manifest).toMatch(/\| `20260929200000` \| `0417_recuperacao_de_clientes` \|/);
+    expect(manifest).toMatch(/\| `20260929200000` \| `0559_recuperacao_de_clientes` \|/);
   });
 
   it("a tabela recuperacao_config é a MESMA na migration e no apêndice do baseline", () => {

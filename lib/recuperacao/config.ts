@@ -1,5 +1,5 @@
 /**
- * A configuração por organização — tabela própria (migration 0417), não
+ * A configuração por organização — tabela própria (migration 0559), não
  * `organizations.settings`. Ausência de linha = recuperação nunca configurada
  * nesta organização (diferente de `ativo=false`, que é "configurada e pausada").
  */

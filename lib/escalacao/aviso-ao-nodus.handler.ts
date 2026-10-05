@@ -19,6 +19,7 @@ const EVENTO_HANDOFF = "ai.handoff_opened";
 
 export const avisoAoNodusHandler: EventHandler = {
   key: AVISO_AO_NODUS_HANDLER_KEY,
+  naOrgParada: "pula",
   events: [EVENTO_CASO, EVENTO_HANDOFF],
   async handle(row): Promise<HandlerResult> {
     const key = AVISO_AO_NODUS_HANDLER_KEY;

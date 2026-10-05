@@ -38,6 +38,10 @@ describe('graph-schema', () => {
         'collect',
         'skill',
         'action',
+        'internal_task',
+        // #2065 — dois tipos de ação que não falam com o cliente.
+        'move_lead',
+        'edit_lead_tag',
         'end',
       ]);
     });

@@ -3,6 +3,7 @@ import type { FollowupFlowSurface } from './api-schemas';
 import { branchIdForCondition, nodeBranches } from './graph-schema';
 import { rotuloDoRamo } from './rotulo-do-ramo';
 import type { NomesDeValor } from './vocabulario';
+import { capabilitiesOf, transportaMensagem, type ChannelProvider } from '../channels/capabilities';
 
 /**
  * Structural publish validator for follow-up flow graphs.
@@ -30,9 +31,14 @@ export const PUBLISH_ERROR_CODES = [
   'cycle_without_wait',
   'max_steps_exceeded',
   'no_fora_da_superficie',
+  'interno_com_envio',
   'roteiro_ramificado',
   'campo_repetido',
   'roteiro_em_ciclo',
+  // #2065 — configuração dos dois nós de ação que não falam com o cliente.
+  'etapa_destino_ausente',
+  'etapa_destino_arquivada',
+  'tag_ausente',
 ] as const;
 export type PublishErrorCode = (typeof PUBLISH_ERROR_CODES)[number];
 
@@ -64,6 +70,26 @@ export interface ContextoDoPublish {
    * sempre a última publicação do ciclo que o fecha, então conferir só nela basta.
    */
   roteiro?: RoteiroDoPublish;
+  /**
+   * Alguma conexão da organização só aceita modelo APROVADO com a janela de 24 h
+   * fechada? Só aí o plano B (`fallback_template_id`) de uma mensagem por IA
+   * depois de 24 h de espera tem o que fazer — em runtime ele só sai com a janela
+   * fechada (`janelaFechada` em followup-turn.ts). Num canal sem janela, exigi-lo
+   * travaria o publish: o seletor do plano B só oferece modelos aprovados, e esse
+   * canal não os tem. Ausente = exige (o comportamento de antes).
+   */
+  exigeModeloForaDaJanela?: boolean;
+}
+
+/**
+ * `true` quando algum dos providers das conexões da organização recusa texto
+ * livre fora da janela. Provider que esta imagem não conhece (ou que não manda
+ * mensagem) não conta: por ele não sai follow-up nenhum.
+ */
+export function algumCanalExigeModeloForaDaJanela(providers: readonly (string | null)[]): boolean {
+  return providers.some(
+    (p) => transportaMensagem(p) && !capabilitiesOf(p as ChannelProvider).freeformOutsideWindow
+  );
 }
 
 export interface RoteiroDoPublish {
@@ -125,10 +151,43 @@ function cicloDoEncadeamento(
  * recusava em silêncio; a recusa aqui é o erro que a pessoa lê no editor.
  */
 export const NOS_DA_SUPERFICIE: Record<FollowupFlowSurface, readonly NodeType[]> = {
-  followup: ['trigger', 'wait', 'condition', 'ai_classify', 'match_reply', 'repeat', 'action', 'end'],
-  crm_automation: ['trigger', 'wait', 'condition', 'ai_classify', 'match_reply', 'repeat', 'action', 'end'],
+  followup: ['trigger', 'wait', 'condition', 'ai_classify', 'match_reply', 'repeat', 'action', 'internal_task', 'move_lead', 'edit_lead_tag', 'end'],
+  crm_automation: ['trigger', 'wait', 'condition', 'ai_classify', 'match_reply', 'repeat', 'action', 'internal_task', 'move_lead', 'edit_lead_tag', 'end'],
   atendimento: ['trigger', 'collect', 'skill', 'end'],
 };
+
+/**
+ * Os nós que ENVIAM mensagem ao cliente num follow-up (#1540).
+ *
+ * `action` é o envio (texto, IA ou template); `collect`/`skill` são de roteiro
+ * de atendimento — superfícies que não têm a marca "somente interno" e, num
+ * fluxo interno, já teriam sido recusadas por `no_fora_da_superficie`.
+ */
+const NOS_QUE_ENVIAM: readonly NodeType[] = ['action'];
+
+/**
+ * SOMENTE INTERNO (#1540): o fluxo marcou que não fala com o cliente, e tem nó
+ * de envio. Recusar na publicação é o único desfecho honesto — aceitar calado
+ * daria ao operador a tela dizendo "publicado" enquanto uma mensagem sairia
+ * para o cliente num fluxo que ele achava interno.
+ */
+function validarSomenteInterno(
+  graph: FlowGraph,
+  surface: FollowupFlowSurface,
+  errors: PublishValidationError[],
+): void {
+  if (surface === 'atendimento') return;
+  if (graph.settings?.somente_interno !== true) return;
+  const enviadores = new Set(NOS_QUE_ENVIAM);
+  for (const n of [...graph.nodes].sort(byId)) {
+    if (!enviadores.has(n.type)) continue;
+    errors.push({
+      node_id: n.id,
+      code: 'interno_com_envio',
+      message: `O fluxo é "somente interno" e a caixa "${n.label}" envia mensagem ao cliente — tire a marca "somente interno" ou troque a caixa por "Lembrete interno".`,
+    });
+  }
+}
 
 /** Regras do roteiro de atendimento que o grafo sozinho não carrega. */
 function validarSuperficie(
@@ -434,6 +493,66 @@ function cobrirRamos(
 }
 
 /**
+ * #2065 — nó `move_lead` sem etapa de destino, ou com uma etapa que não existe
+ * mais / está arquivada. Mesma régua da `conferirRegras` logo abaixo (e o mesmo
+ * `ContextoDoPublish.etapas`, lido por quem publica): o que só o banco sabe chega
+ * injetado, nunca adivinhado. Sem `contexto.etapas` a conferência não roda — ela
+ * recusa o que é visível, não o que é incerto.
+ */
+function conferirEtapaDestino(
+  node: Extract<FlowNode, { type: 'move_lead' }>,
+  contexto: ContextoDoPublish,
+  errors: PublishValidationError[]
+): void {
+  const destino = node.config.stage_id.trim();
+  const ancora = { node_id: node.id };
+  if (destino === '') {
+    errors.push({
+      ...ancora,
+      code: 'etapa_destino_ausente',
+      message: `A caixa "${node.label}" não tem etapa de destino — escolha para onde o card vai.`,
+    });
+    return;
+  }
+  if (contexto.etapas === undefined) return;
+  const etapa = contexto.etapas.get(destino);
+  if (etapa === undefined) {
+    errors.push({
+      ...ancora,
+      code: 'etapa_destino_ausente',
+      message: `A caixa "${node.label}" aponta para uma etapa que não existe mais — escolha a etapa na lista.`,
+    });
+    return;
+  }
+  if (etapa.arquivada) {
+    errors.push({
+      ...ancora,
+      code: 'etapa_destino_arquivada',
+      message: `A caixa "${node.label}" move para a etapa arquivada "${etapa.nome}" — escolha uma etapa ativa.`,
+    });
+  }
+}
+
+/**
+ * #2065 — nó `edit_lead_tag` sem tag (lista vazia ou com tag em branco). O
+ * schema aceita, porque o rascunho tem de salvar trabalho pela metade; publicado,
+ * um nó que não grava nada é mentira de interface.
+ */
+function conferirTags(
+  node: Extract<FlowNode, { type: 'edit_lead_tag' }>,
+  errors: PublishValidationError[]
+): void {
+  const tags = node.config.tags.map((t) => t.trim());
+  if (tags.length === 0 || tags.some((t) => t === '')) {
+    errors.push({
+      node_id: node.id,
+      code: 'tag_ausente',
+      message: `A caixa "${node.label}" não tem tag para gravar — escreva ao menos uma tag.`,
+    });
+  }
+}
+
+/**
  * Uma regra de condição que não pode decidir nada. O rascunho aceita todas estas
  * formas — trabalho pela metade precisa salvar —, mas publicada cada uma é uma
  * saída que nunca é tomada ou que é tomada sempre, com cara de regra pronta:
@@ -508,7 +627,9 @@ export function validateFlowForPublish(
 ): PublishValidationResult {
   const { nodes, edges } = graph;
   const errors: PublishValidationError[] = [];
-  validarSuperficie(graph, contexto.surface ?? 'followup', errors, contexto.roteiro);
+  const surface = contexto.surface ?? 'followup';
+  validarSuperficie(graph, surface, errors, contexto.roteiro);
+  validarSomenteInterno(graph, surface, errors);
   const etapas = contexto.etapas;
   const nomes: NomesDeValor = etapas ? { etapa: (id) => etapas.get(id)?.nome ?? null } : {};
   const nodesById = new Map(nodes.map((n) => [n.id, n]));
@@ -564,7 +685,8 @@ export function validateFlowForPublish(
       nodesById,
       outEdges
     );
-    for (const id of [...longWaitNodeIds].sort()) {
+    const exigeModelo = contexto.exigeModeloForaDaJanela !== false;
+    for (const id of exigeModelo ? [...longWaitNodeIds].sort() : []) {
       errors.push({
         node_id: id,
         code: 'long_wait_needs_template',
@@ -610,6 +732,14 @@ export function validateFlowForPublish(
 
   for (const node of [...nodes].sort(byId)) {
     if (node.type === 'condition') conferirRegras(node, contexto, errors);
+  }
+
+  // #2065 — os nós de ação nascem sem destino (o rascunho valida só a forma) e
+  // é AQUI que a escolha passa a ser obrigatória: publicar um nó que não move
+  // nem grava nada seria dizer à pessoa que o fluxo faz o que ele não faz.
+  for (const node of [...nodes].sort(byId)) {
+    if (node.type === 'move_lead') conferirEtapaDestino(node, contexto, errors);
+    if (node.type === 'edit_lead_tag') conferirTags(node, errors);
   }
 
   for (const node of [...nodes].sort(byId)) {

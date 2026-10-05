@@ -3,7 +3,7 @@
  * defaults do schema, se a organização nunca configurou).
  * PUT /api/v1/recuperacao/config — grava.
  *
- * Papel: `manager`, mesma régua de Campanhas (migration 0417 RLS) — disparar
+ * Papel: `manager`, mesma régua de Campanhas (migration 0559 RLS) — disparar
  * WhatsApp em massa pra base de clientes não é gesto de `viewer` nem `agent`.
  */
 import { randomUUID } from "node:crypto";

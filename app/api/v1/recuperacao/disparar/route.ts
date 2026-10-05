@@ -3,7 +3,7 @@
  * rodada de recuperação fora da hora programada, pela mesma
  * `lib/recuperacao/abrir-rodada.ts` que o cron chama. A trava contra duplicar
  * é a mesma dos dois caminhos: `unique (organization_id, rodada_data)`
- * (migration 0417) — clicar duas vezes no mesmo dia dá 409, não duas campanhas.
+ * (migration 0559) — clicar duas vezes no mesmo dia dá 409, não duas campanhas.
  */
 import { randomUUID } from "node:crypto";
 

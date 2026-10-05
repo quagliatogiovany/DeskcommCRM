@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ApiError } from "@/lib/api/types";
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
+import { idsDosCanaisDesativados } from "@/lib/channels/desativado";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { CONVERSATION_TERMINAL_STATUSES } from "@/lib/schemas";
 import type {
@@ -18,7 +19,7 @@ import type {
 import type { Conversation } from "@/lib/types/messaging";
 import { normalizarTermoDeBusca } from "@/lib/inbox/termo-de-busca";
 import { ORDEM_DA_ESPERA, ehAFila } from "@/lib/inbox/comando-da-conversa";
-import { aplicarMarcador } from "@/lib/inbox/marcador-da-conversa";
+import { aplicarMarcadores } from "@/lib/inbox/marcador-da-conversa";
 
 /**
  * Prepara o termo digitado para viajar dentro de um `or=` do PostgREST.
@@ -197,6 +198,32 @@ export async function listConversationsHandler(
     query = query.not("status", "in", `(${CONVERSATION_TERMINAL_STATUSES.join(",")})`);
   }
   if (q.channel_session_id) query = query.eq("channel_session_id", q.channel_session_id);
+  // Canal desativado nunca entra na inbox (quarentena): exclui as conversas
+  // dele aqui e nos badges, mantendo o acesso direto por id para auditoria e
+  // suporte. Reativou, reaparecem sem reimportar nada.
+  const idsDesativados = await idsDosCanaisDesativados(supabase, ctx.organization_id);
+  if (idsDesativados.length > 0) {
+    query = query.not("channel_session_id", "in", `(${idsDesativados.join(",")})`);
+  }
+  // ── O CONTATO, NO PRÓPRIO `WHERE` (#2184) ──────────────────────────────
+  //
+  // `crm_list_conversations` filtrava o contato DEPOIS do handler devolver a
+  // página: a conversa mais antiga do mesmo cliente, fora daquela página, era
+  // inalcançável — e o `has_more: false` que saía junto dizia ao agente que
+  // não havia mais nada. Filtrar antes do `.limit` é o que faz cursor e
+  // `has_more` descreverem o conjunto DO CONTATO: a próxima página continua
+  // sendo do mesmo cliente.
+  //
+  // Compondo sobre a MESMA query, que já carrega `.eq("organization_id", …)` —
+  // este handler usa o admin client, que passa por cima da RLS: o filtro
+  // manual de organização é a única barreira, e uma consulta nova nasceria
+  // sem nenhuma.
+  if (q.contact_id) query = query.eq("contact_id", q.contact_id);
+  // A aba "Grupos" (Task 10). `undefined` (ausente) = sem filtro, a lista
+  // mostra tudo, como hoje — checagem explícita contra `undefined`, e não
+  // `if (q.is_group)`, porque `"false"` é um valor válido e verdadeiro-truthy
+  // como string.
+  if (q.is_group !== undefined) query = query.eq("is_group", q.is_group === "true");
   // ⚠️ O MARCADOR FILTRADO É O DA CONVERSA **OU** O DO CONTATO.
   //
   // Era só `conversations.tags`, e o relato mede o buraco: *"adicionei a tag nele
@@ -214,7 +241,14 @@ export async function listConversationsHandler(
   // A régua do marcador mora num lugar só (`lib/inbox/marcador-da-conversa.ts`),
   // porque a segunda régua sempre diverge: foi assim que a contagem das abas
   // passou a pedir uma coluna que não existe (#1223). Aqui ela é só aplicada.
-  if (q.tag) query = aplicarMarcador(query, q.tag);
+  //
+  // ⚠️ `aplicarMarcadores`, e o `modo` vai junto (#1274). O filtro passou a
+  // aceitar VÁRIAS etiquetas com E/OU, e `aplicarMarcadores` é quem sabe as
+  // duas coisas: que uma etiqueta só tem de sair byte a byte como antes, e que
+  // E (`cs`) e OU (`ov`) são operadores diferentes. Chamar `aplicarMarcador`
+  // aqui com a lista inteira faria o TypeScript aceitar e o filtro casar o
+  // ARRAY como se fosse um marcador só — lista vazia, sem erro.
+  if (q.tag) query = aplicarMarcadores(query, q.tag, q.modo);
 
   // No BANCO, e não em memória: filtrar depois de paginar devolveria páginas curtas —
   // e, quando a página inteira estivesse lida, uma lista vazia que a tela apresentava
@@ -479,8 +513,11 @@ export async function patchConversationHandler(
       p_org: ctx.organization_id, p_conversation: conversationId, p_status: input.status,
       p_expected: input.expected_revision ?? observed.service_revision,
     });
-    if (statusError) throw new ApiError(statusError.code === "40001" ? 409 : statusError.code === "P0002" ? 404 : 500,
-      statusError.code === "40001" ? "conflict" : statusError.code === "P0002" ? "not_found" : "internal_error", undefined, ctx.requestId, statusError.message);
+    // PT409: revisão obsoleta (migration 0514). 40001: contato trocou no meio, ou banco anterior à 0514.
+    const conflito = statusError?.code === "PT409" || statusError?.code === "40001";
+    if (statusError) throw new ApiError(conflito ? 409 : statusError.code === "P0002" ? 404 : 500,
+      conflito ? "conflict" : statusError.code === "P0002" ? "not_found" : "internal_error", undefined, ctx.requestId,
+      conflito ? traduzir("O atendimento mudou. Atualize e tente novamente.", ctx.idioma ?? "pt-BR") : statusError.message);
   }
   if (input.tags !== undefined) {
     update.tags = input.tags;

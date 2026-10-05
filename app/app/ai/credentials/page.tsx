@@ -7,10 +7,21 @@ import type { CredentialRow } from "@/hooks/ai/useCredentials";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { contarUsoQueBloqueia, type VersaoVinculada } from "@/lib/ai/credenciais/uso";
 import { lerConfigDoJev } from "@/lib/ai/decisao/config";
+import {
+  algumFluxoQueClassifica,
+  algumRoteadorQuePergunta,
+  estadoEfetivoDaTarefa,
+  INSCRICAO_ENCERRADA,
+  TAREFAS_DO_JEV,
+  tarefaSemCamada,
+  tarefaSemFluxo,
+  tarefaSemRoteador,
+} from "@/lib/ai/decisao/tarefas";
+import { camadasEfetivas } from "@/lib/agent-engine/guardrails/camadas-da-org";
 import { DEFAULT_CLASSIFIER_MODEL } from "@/lib/ai/gateway";
 import { resolverModeloDoPonto } from "@/lib/ai/gateway-binding";
-import { PONTOS_DO_JEV } from "@/lib/ai/pontos/registro";
 import { lerAmbiente } from "@/lib/instalacao/ambiente";
+import { logger } from "@/lib/logger";
 import { PROVEDORES } from "@/lib/ai/pontos/provedores";
 import { tagDeIdioma } from "@/lib/i18n/datas";
 import { CredentialsList } from "./_components/CredentialsList";
@@ -36,7 +47,7 @@ export default async function CredentialsPage() {
     .eq("organization_id", activeOrg.orgId)
     .order("created_at", { ascending: false });
 
-  const credentials = (data ?? []) as unknown as CredentialRow[];
+  const credentials = (data ?? []) as CredentialRow[];
   const canWrite = ROLE_RANK[activeOrg.role] >= ROLE_RANK.admin;
 
   // Mesma regra do DELETE — e a mesma da FK `ON DELETE RESTRICT`: TODA versão
@@ -62,11 +73,67 @@ export default async function CredentialsPage() {
     .select("settings")
     .eq("id", activeOrg.orgId)
     .maybeSingle();
-  const jevLigado = lerConfigDoJev(orgRow?.settings).ligado;
+  const configDoJev = lerConfigDoJev(orgRow?.settings);
+  const jevLigado = configDoJev.ligado;
+  // A camada que a manipulação acompanha: desligada, a tarefa não roda. Leitura
+  // que falha não cai no padrão do ambiente (que liga a camada): a tela deixa a
+  // tarefa de fora em vez de afirmar que ela roda — falha fechada na afirmação.
+  const { data: linhasDasCamadas, error: erroDasCamadas } = jevLigado
+    ? await supabase.from("org_guardrail_layers").select("layer, enabled").eq("organization_id", activeOrg.orgId)
+    : { data: null, error: null };
+  const camadas = erroDasCamadas ? null : camadasEfetivas(linhasDasCamadas ?? []);
+  // O roteador: sem um ativo que o Jev possa perguntar, ele não escolhe agente
+  // nenhum. Leitura que falha: a tarefa sai da lista, pelo mesmo motivo.
+  const { data: roteadoresAtivos, error: erroDosRoteadores } = jevLigado
+    ? await supabase
+        .from("ai_routers")
+        .select("id, intencoes:ai_router_members(count)")
+        .eq("organization_id", activeOrg.orgId)
+        .eq("is_active", true)
+    : { data: null, error: null };
+  const temRoteadorQuePergunta = !erroDosRoteadores && algumRoteadorQuePergunta(roteadoresAtivos ?? []);
+  // O follow-up: sem um publicado com o passo "Classificar (IA)", nem uma
+  // inscrição andando numa versão com ele, ninguém lê a resposta do cliente — a
+  // mesma leitura da rota do cartão. Leitura que falha: a tarefa sai da lista, idem.
+  const [{ data: fluxosPublicados, error: erroDosPublicados }, { data: versoesEmCurso, error: erroDasEmCurso }] =
+    jevLigado
+      ? await Promise.all([
+          supabase
+            .from("followup_flow_pointers")
+            .select("versao:followup_flow_versions!followup_flow_pointers_active_version_id_fkey(graph)")
+            .eq("organization_id", activeOrg.orgId)
+            .eq("status", "active"),
+          supabase
+            .from("followup_flow_versions")
+            .select("graph, inscricoes:followup_enrollments!inner(id)")
+            .eq("organization_id", activeOrg.orgId)
+            .not("inscricoes.status", "in", INSCRICAO_ENCERRADA)
+            .limit(1, { referencedTable: "inscricoes" }),
+        ])
+      : [{ data: null, error: null }, { data: null, error: null }];
+  const erroDosFluxos = erroDosPublicados ?? erroDasEmCurso;
+  const temFluxoQueClassifica =
+    !erroDosFluxos &&
+    algumFluxoQueClassifica([...(fluxosPublicados ?? []), ...(versoesEmCurso ?? []).map((versao) => ({ versao }))]);
+  if (erroDasCamadas || erroDosRoteadores || erroDosFluxos) {
+    logger.warn("credenciais: o \"Usada em\" do Jev saiu sem conferir a camada, o roteador ou os follow-ups", {
+      organization_id: activeOrg.orgId,
+      camadas: erroDasCamadas?.message ?? null,
+      roteadores: erroDosRoteadores?.message ?? null,
+      fluxos: erroDosFluxos?.message ?? null,
+    });
+  }
   // A mesma pergunta que o worker faz: sem a chave do Jev, há IA principal para medir?
   const jev = jevLigado
     ? {
-        tarefas: PONTOS_DO_JEV.map((p) => p.rotulo),
+        // Só as tarefas que a chave de fato serve agora.
+        tarefas: TAREFAS_DO_JEV.filter(
+          (t) =>
+            estadoEfetivoDaTarefa(configDoJev, t) !== "desligada" &&
+            (camadas === null ? t.camada === undefined : !tarefaSemCamada(t, camadas)) &&
+            !tarefaSemRoteador(t, temRoteadorQuePergunta) &&
+            !tarefaSemFluxo(t, temFluxoQueClassifica),
+        ).map((t) => t.rotulo),
         temIaPrincipal:
           (await resolverModeloDoPonto("sentiment_classify", activeOrg.orgId, DEFAULT_CLASSIFIER_MODEL, {
             naFaltaUsarOPadraoDaOrganizacao: true,

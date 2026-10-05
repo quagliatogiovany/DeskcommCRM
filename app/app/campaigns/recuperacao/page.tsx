@@ -1,6 +1,6 @@
 /**
  * Campanhas → Recuperação. Configura o disparo de recuperação de clientes
- * inativos desta organização (migration 0417) — a tela só aparece pra quem já
+ * inativos desta organização (migration 0559) — a tela só aparece pra quem já
  * ligou a loja no Nodus (`organizations.nodus_api_key`): sem isso não há de
  * onde vir "quem está inativo".
  */

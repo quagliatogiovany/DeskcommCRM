@@ -33,6 +33,11 @@ export const ApiErrorCodes = {
   forbidden: "forbidden",
   forbidden_role: "forbidden_role",
   forbidden_tenant: "forbidden_tenant",
+  // Conta da empresa suspensa (spec da cobrança §4): sessão, token `dsk_` e MCP.
+  // Só LGPD e cobrança passam, por `requireRole({ permiteOrgSuspensa: true })`.
+  org_suspended: "org_suspended",
+  // Platform admin `support_readonly` tentando ESCREVER (`requirePlatformAdminEscrita`).
+  forbidden_scope: "forbidden_scope",
   lgpd_anonymization_irreversible: "lgpd_anonymization_irreversible",
 
   // 404
@@ -70,6 +75,17 @@ export const ApiErrorCodes = {
   // retentar depois resolve, enquanto conflito manda trocar a chave.
   idempotency_in_progress: "idempotency_in_progress",
   state_conflict: "state_conflict",
+  // Escrita vinda de uma aba que ficou numa organização diferente da do cookie
+  // `active_org` (#2335). O header `X-Org-Da-Aba` só serve para RECUSAR: a org
+  // efetiva continua sendo a do cookie (`lib/auth/require-role.ts`).
+  org_divergente: "org_divergente",
+  // POST /admin/tenants/[id]/reactivate sobre suspensão por falta de pagamento:
+  // a saída é "Dar prazo" ou "Tornar isenta", nunca o "Reativar" genérico.
+  suspensao_de_cobranca: "suspensao_de_cobranca",
+  // POST /admin/tenants/[id]/suspend|reactivate quando o descarte da fila bate
+  // na trava do aviso do Meet (`appointment_notice_busy`, 40001): outra escrita
+  // do mesmo contato está em curso. Nada foi gravado; tentar de novo resolve.
+  retry_later: "retry_later",
   invalid_state: "invalid_state", // resposta a um agent_case que saiu de awaiting_human (spec 15 §7)
   tenant_already_exists: "tenant_already_exists",
   // POST /api/v1/settings/api-tokens quando a organização já está no teto de
@@ -93,6 +109,7 @@ export const ApiErrorCodes = {
   // 422 — semântica
   unprocessable_entity: "unprocessable_entity",
   channel_without_session: "channel_without_session", // operação de sessão (reiniciar, parear) pedida a canal que não tem sessão no transporte — o oficial
+  janela_fechada: "janela_fechada", // POST /messages por token/agente com texto livre fora das 24h em canal com restrição (131047) — a saída é modelo aprovado (#1614)
   invalid_state_transition: "invalid_state_transition",
   invalid_owner: "invalid_owner", // novo dono não é membro ativo agent+ da org (bulk assign, G3-04)
   trigger_kind_not_implemented: "trigger_kind_not_implemented", // publish de followup-flow com kind sem motor de enrollment (stage_change/conversation_end)
@@ -100,6 +117,9 @@ export const ApiErrorCodes = {
   // colar e testar a chave, ou marcar o aceite de mandar a mensagem para fora.
   jev_exige_chave_validada: "jev_exige_chave_validada",
   jev_exige_aceite: "jev_exige_aceite",
+  // PATCH /api/v1/ai/jev pedindo `decidindo` numa tarefa que, nesta versão, só
+  // observa (`soObserva` em lib/ai/decisao/tarefas.ts) — a do follow-up.
+  jev_tarefa_so_observa: "jev_tarefa_so_observa",
 
   // 415 — tipo de mídia
   unsupported_media_type: "unsupported_media_type",
@@ -196,6 +216,23 @@ export const ApiErrorCodes = {
   pipeline_no_lost_stage: "pipeline_no_lost_stage",
   // 404: o funil de destino não existe (ou não é desta organização).
   pipeline_not_found: "pipeline_not_found",
+  // 409 (issue #1538): o funil é `novo_negocio` e a escrita reabriria um
+  // negócio encerrado. Os QUATRO caminhos (arrasto, lote, IA/automação, MCP)
+  // devolvem este mesmo código, e a tela o reconhece para oferecer a retomada.
+  reabertura_cria_novo: "reabertura_cria_novo",
+  // 422: chamaram `/retomar` num negócio que continua ABERTO — não há o que
+  // retomar, e criar aí duplicaria o card que já está no quadro.
+  reabertura_lead_aberto: "reabertura_lead_aberto",
+  // ─── CAMPOS OBRIGATÓRIOS E MOTIVO DE GANHO (issue #1536) ───
+  //
+  // As duas recusas do núcleo novo, cada uma com a sua demanda: a primeira pede
+  // PREENCHER (o `details.faltando` nomeia chave e rótulo de cada campo — e
+  // quando o que falta é o motivo de ganho a chave é `won_reason`, um caso do
+  // mesmo contrato, não um código à parte), a segunda pede ESCOLHER da lista
+  // cadastrada (`settings.won_reasons`). Colapsá-las mandaria quem já informou
+  // escolher sem lista, e quem não informou digitar sem caminho.
+  required_fields_missing: "required_fields_missing",
+  won_reason_invalid: "won_reason_invalid",
 
   // ─── AVISO DE CASO NO WHATSAPP (migration 0292, onda 8) ───
   //
@@ -235,7 +272,7 @@ export const ApiErrorCodes = {
   campanha_conteudo_invalido: "campanha_conteudo_invalido", // 422: texto vazio ou variável que não existe
   campanha_base_legal_invalida: "campanha_base_legal_invalida", // 422: interesse legítimo sem referência da LIA
 
-  // ─── Módulo RECUPERAÇÃO DE CLIENTES (migration 0417) ───
+  // ─── Módulo RECUPERAÇÃO DE CLIENTES (migration 0559) ───
   recuperacao_config_invalida: "recuperacao_config_invalida", // 422: zod recusou o corpo
   recuperacao_nao_configurada: "recuperacao_nao_configurada", // 409: sem linha em recuperacao_config, ou `ativo=false`
   recuperacao_nao_configurada_no_nodus: "recuperacao_nao_configurada_no_nodus", // 409: organização sem nodus_api_key
@@ -247,6 +284,7 @@ export const ApiErrorCodes = {
   upstream_unavailable: "upstream_unavailable",
   unavailable: "unavailable", // 503: dependência de config ausente (ex.: pool do engine sem SUPABASE_DB_URL)
   waha_error: "waha_error",
+  channel_unavailable: "channel_unavailable", // 502: o transporte do canal não respondeu (ex.: listar grupos com a sessão fora de WORKING)
   wacalls_error: "wacalls_error", // 502: o serviço de chamada de voz recusou ou não respondeu
   wacalls_not_connected: "wacalls_not_connected", // 503 + Retry-After: sessão pareada cujo socket com o WhatsApp caiu por um instante (ver `wacallsSemConexao`)
   ai_provider_error: "ai_provider_error",

@@ -17,10 +17,17 @@ import {
   useChannelSessions,
   type ChannelSession,
 } from "@/hooks/channels/useChannelSessions";
-import { CHANNEL_PROVIDER_SOCIAL } from "@/lib/channels/capabilities";
+import {
+  CHANNEL_PROVIDER_SOCIAL,
+  DEFAULT_CHANNEL_PROVIDER,
+  capabilitiesOf,
+} from "@/lib/channels/capabilities";
+import type { ChannelProvider } from "@/lib/channels/capabilities";
 import { usePacingKnobs } from "@/hooks/channels/usePacingKnobs";
 import { AntiBanSheet } from "./AntiBanSheet";
+import { GruposSheet } from "./GruposSheet";
 import { PairingOptions } from "./PairingOptions";
+import { ChannelAcervo } from "./ChannelAcervo";
 import { ChannelAiAccess } from "./ChannelAiAccess";
 import { ParaIntegrar } from "./ParaIntegrar";
 import { Badge } from "@/components/ui/badge";
@@ -37,12 +44,16 @@ import {
   ArrowsClockwise,
   CheckCircle,
   CircleNotch,
+  Pause,
   Phone,
+  Play,
   Plus,
   ShieldCheck,
   Trash,
+  UsersThree,
   Warning,
 } from "@/lib/ui/icons";
+import { canalDesativado } from "@/lib/channels/desativado";
 import { lerEstadoDoCanal } from "@/lib/channels/estado";
 import { fonteDeTemplates } from "@/lib/channels/templates-fonte";
 import { useT } from "@/hooks/i18n/useT";
@@ -141,6 +152,7 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
   const [checking, setChecking] = useState(false);
   const [qr, setQr] = useState<{ sessionId: string; title: string } | null>(null);
   const [antiBanId, setAntiBanId] = useState<string | null>(null);
+  const [gruposId, setGruposId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<ChannelSession | null>(null);
   const pacingItems = usePacingKnobs().data?.items ?? [];
 
@@ -228,6 +240,26 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
       invalidate();
     },
     [invalidate],
+  );
+
+  // Pausar = canal desativado pelo operador: a entrega é gravada mas não entra
+  // na inbox, não dispara IA e não gera follow-up. Reativar volta tudo sem
+  // reimportar nada. Diferente de excluir: o canal continua listado.
+  const handleToggleDisabled = useCallback(
+    async (c: ChannelSession) => {
+      const desligar = !canalDesativado(c.metadata);
+      setBusyId(c.id);
+      try {
+        await apiClient.patch(`/api/v1/channel-sessions/${c.id}/disabled`, { disabled: desligar });
+        toast.success(desligar ? t("Canal pausado.") : t("Canal reativado."));
+        invalidate();
+      } catch (err) {
+        toast.error(errMsg(err, "Não foi possível mudar o estado do canal.", t));
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [invalidate, t],
   );
 
   const handleDeleted = useCallback(() => {
@@ -376,6 +408,7 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
           {list.map((c) => {
             const info = statusInfo(c.status, t);
+            const pausado = canalDesativado(c.metadata);
             const policy = routing.data?.data?.channels?.find((channel) => channel.id === c.id);
             // Sem o serviço no ar a rota de exclusão falha fechado (503) para
             // quem depende dele: oferecer o botão seria prometer uma ação que
@@ -403,6 +436,7 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                     )}
                   </div>
                   <Badge variant={info.variant}>{info.label}</Badge>
+                  {pausado && <Badge variant="neutral">{t("Pausado")}</Badge>}
                 </div>
                 <p className="text-[11px] text-muted-foreground">
                   {c.last_health_check_at
@@ -410,6 +444,7 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                     : t("Ainda não verificado")}
                 </p>
                 <ChannelAiAccess channelId={c.id} />
+                {dependeDoTransporte(c) && <ChannelAcervo channelId={c.id} />}
                 <p className="text-xs text-muted-foreground">{t(!policy ? "Consulte os responsáveis em Atendimento." : policy.mode === "legacy_unconfigured" ? "Usa todos os atendentes elegíveis da organização." : policy.mode === "restricted_empty" ? "Ninguém configurado — as conversas ficarão na fila." : "Somente as pessoas selecionadas recebem este número.")}</p>
                 <div className="mt-auto flex flex-wrap gap-2">
                   {/* Some no canal oficial em vez de aparecer desabilitado: não é
@@ -435,6 +470,33 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
                     <ShieldCheck size={14} aria-hidden />
                     {t("Proteção de envio")}
                   </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busyId === c.id}
+                    aria-label={
+                      pausado
+                        ? `${t("Retomar")} ${channelLabel(c, t)}`
+                        : `${t("Pausar")} ${channelLabel(c, t)}`
+                    }
+                    onClick={() => void handleToggleDisabled(c)}
+                  >
+                    {busyId === c.id ? (
+                      <CircleNotch size={14} className="animate-spin" aria-hidden />
+                    ) : pausado ? (
+                      <Play size={14} aria-hidden />
+                    ) : (
+                      <Pause size={14} aria-hidden />
+                    )}
+                    {pausado ? t("Retomar") : t("Pausar")}
+                  </Button>
+                  {capabilitiesOf((c.provider ?? DEFAULT_CHANNEL_PROVIDER) as ChannelProvider).groups !==
+                    "none" && (
+                    <Button variant="outline" size="sm" onClick={() => setGruposId(c.id)}>
+                      <UsersThree size={14} aria-hidden />
+                      {t("Grupos")}
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -465,6 +527,12 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
           onClose={() => setAntiBanId(null)}
         />
       )}
+
+      {/* Sem checagem de papel aqui: quem chega a `ConnectionsClient` já passou
+          pelo gate de `/app/connections` (admin+, `app/app/connections/page.tsx`),
+          o mesmo motivo por trás do `canWrite` fixo do `AntiBanSheet` acima. A
+          rota `groups` também exige `manager+` do lado do servidor. */}
+      {gruposId !== null && <GruposSheet channelId={gruposId} onClose={() => setGruposId(null)} />}
 
       {toDelete && (
         <ExcluirCanalDialog

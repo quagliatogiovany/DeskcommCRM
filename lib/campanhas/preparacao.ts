@@ -100,6 +100,7 @@ async function classificar(
     filtro: entrada.filtro,
     agora: entrada.agora,
     extraPorContato: entrada.extraPorContato,
+    corpo: entrada.corpo,
   });
   const jaEmCampanha = await contatosJaEmCampanha(
     admin,
@@ -117,6 +118,8 @@ async function classificar(
     renderizar: (c: CandidatoDaAudiencia) => {
       const r = renderizar(entrada.corpo, {
         nome: c.nome,
+        lead: c.lead,
+        contato: c.contato,
         diasSemPedir: c.extra?.diasSemPedir ?? null,
         ultimoPedido: c.extra?.ultimoPedido ?? null,
       });

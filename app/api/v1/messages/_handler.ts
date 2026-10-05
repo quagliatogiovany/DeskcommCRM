@@ -27,6 +27,7 @@ import { decidirPreGoLiveDoCanalViaSupabase } from "@/lib/ai/elegibilidade/consu
 import type { Actor, HandlerCtx } from "@/lib/api/handlers/types";
 import { audit } from "@/lib/audit";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { assertOrgOperante } from "@/lib/organizacao/operante";
 import {
   CHANNEL_SESSION_REF_COLUMNS,
   DEFAULT_CHANNEL_PROVIDER,
@@ -35,8 +36,11 @@ import {
   type ChannelSessionRef,
 } from "@/lib/channels";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { canalDesativado } from "@/lib/channels/desativado";
 import { conferirDefinicao } from "@/lib/channels/conferir-definicao";
+import { estadoDaJanela } from "@/lib/channels/janela";
 import { isMediaPathOwnedBy } from "@/lib/messaging/media/upload-validation";
+import { assertUrlDeMidiaSegura } from "@/lib/messaging/media/url-de-midia-externa";
 import {
   buildVcard,
   normalizePhoneForDisplay,
@@ -45,7 +49,10 @@ import {
 } from "@/lib/messaging/contact-card";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
 import { sendTemplateForSession } from "@/lib/channels/meta/send-template-for-session";
+import { emitirFalhaDeEntrega } from "@/lib/messaging/falha-de-entrega";
+import { aplicarAssinatura, configAssinatura, linhaDeAssinatura } from "@/lib/messaging/assinatura";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
+import { nomesDosAtendentes } from "@/lib/users/nome-do-atendente";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Message } from "@/lib/types/messaging";
 
@@ -175,7 +182,7 @@ export function origemDaMensagem(actor: Actor): "user" | "ai" | "automation" | "
 }
 
 const MSG_COLS =
-  "id, organization_id, conversation_id, channel_session_id, contact_id, external_id, type, direction, status, ack, error_code, error_message, body, media_url, media_mime, media_size_bytes, media_storage_path, sent_via, sent_by_user_id, sent_at, delivered_at, read_at, metadata, edited_at, revoked_at, reply_to_message_id, created_at";
+  "id, organization_id, conversation_id, channel_session_id, contact_id, external_id, type, direction, status, ack, error_code, error_message, body, media_url, media_mime, media_size_bytes, media_storage_path, media_derived_text, media_derived_status, sent_via, sent_by_user_id, sent_on_behalf_of_user_id, sent_at, delivered_at, read_at, metadata, edited_at, revoked_at, reply_to_message_id, created_at";
 
 /**
  * `Actor.type` → o vocabulário de `messages.sent_via` (o CHECK da coluna:
@@ -215,6 +222,18 @@ function actorAuditPayload(actor: Actor): {
         : {}),
     },
   };
+}
+
+/**
+ * O `api_tokens.id` de quem enviou, para a coluna `actor_api_token_id` do
+ * audit. Só os atores que SÃO token têm essa ponta — `user` e
+ * `webhook_source` não, e `undefined` mantém a coluna nula do jeito que a
+ * auditoria já espera.
+ */
+function apiTokenIdDoActor(actor: Actor): string | undefined {
+  if (actor.type === "api_token") return actor.id;
+  if (actor.type === "ai_agent") return actor.api_token_id;
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +373,10 @@ export async function sendMessageHandler(
   ctx: HandlerCtx,
   input: SendMessageInput,
 ): Promise<Message> {
+  // Organização parada (suspensa, redigida, arquivada) não envia nada. Esta é a
+  // porta de saída de TODOS os chamadores, e fecha a corrida de quem passou pelo
+  // gate antes da suspensão. O erro é terminal (`terminal: true`).
+  await assertOrgOperante(supabase, ctx.organization_id);
   if (ctx.prospectingDelivery) await assertProspectingDelivery(supabase, ctx.prospectingDelivery);
   if (ctx.meetingDelivery) await assertMeetingDeliverySupabase(supabase, ctx.meetingDelivery);
   if (ctx.approvedReply) await assertApprovedReplySupabase(supabase, ctx.approvedReply);
@@ -375,7 +398,7 @@ export async function sendMessageHandler(
   // envio com 42703. Sem a coluna, nada está arquivado — e a consulta sem ela é a
   // consulta certa (ver lib/channels/archived).
   const convSelect = (comArchived: boolean) =>
-    `id, organization_id, contact_id, channel_session_id, is_group, group_chat_id, bot_silenced_until, provider_conversation_id, last_inbound_at, contacts:contact_id(phone_number, wa_identity, wa_lid, is_blocked), channel_sessions:channel_session_id(${CHANNEL_SESSION_REF_COLUMNS}, status${comArchived ? `, ${ARCHIVED_AT}` : ""})`;
+    `id, organization_id, contact_id, channel_session_id, is_group, group_chat_id, bot_silenced_until, provider_conversation_id, last_inbound_at, contacts:contact_id(phone_number, wa_identity, wa_lid, is_blocked), channel_sessions:channel_session_id(${CHANNEL_SESSION_REF_COLUMNS}, status, metadata${comArchived ? `, ${ARCHIVED_AT}` : ""})`;
   //
   // O filtro por `organization_id` NÃO é redundância com a RLS — é a única
   // proteção que existe na metade dos chamadores. Este handler é a porta de
@@ -444,7 +467,7 @@ export async function sendMessageHandler(
       wa_lid: string | null;
       is_blocked: boolean;
     } | null;
-    channel_sessions: (ChannelSessionRef & { status: string; archived_at?: string | null }) | null;
+    channel_sessions: (ChannelSessionRef & { status: string; metadata?: Record<string, unknown> | null; archived_at?: string | null }) | null;
   };
   const c = conv as unknown as Joined;
 
@@ -456,6 +479,53 @@ export async function sendMessageHandler(
       ctx.requestId,
       traduzir("Contato bloqueou o atendimento.", ctx.idioma ?? "pt-BR"),
     );
+  }
+
+  // ─── A janela de 24h, ANTES de qualquer linha nascer (#1614) ──────────────
+  //
+  // Em canal com hetero-restrição, texto livre só sai enquanto o cliente
+  // escreveu nas últimas 24h — fora disso só modelo aprovado, e a plataforma
+  // recusa com 131047. Antes disto a rota respondia 201, a linha virava `sent`
+  // e a recusa chegava DEPOIS, pelo webhook de status: quem integra registrava
+  // "cobrança enviada" e o cliente nunca recebia.
+  //
+  // Só quem chega POR TOKEN (`api_token` e `ai_agent`): a tela já barre o
+  // composer (components/inbox/InboxLayout.tsx, mesma régua) e o agente de IA
+  // tem o gate 3.5 da cadeia `before_send`. Os dois — operador e regra de
+  // automação — seguem com o contrato de antes; a issue é sobre quem integra.
+  //
+  // `estadoDaJanela` é a MESMA régua da tela (lib/channels/janela.ts): um só
+  // lugar decide o que é "janela fechada", e é ele que a tela já trata.
+  if (
+    (ctx.actor.type === "api_token" || ctx.actor.type === "ai_agent") &&
+    input.type !== "template"
+  ) {
+    const janela = estadoDaJanela(
+      c.channel_sessions?.provider ?? DEFAULT_CHANNEL_PROVIDER,
+      c.last_inbound_at,
+      new Date(),
+    );
+    if (janela.tipo === "fechada") {
+      throw new ApiError(
+        422,
+        "janela_fechada",
+        {
+          codigo: "janela_fechada",
+          // `null` = o cliente nunca escreveu: não houve abertura, e inventar
+          // um horário seria prometer uma janela que nunca existiu.
+          ultima_mensagem_do_cliente: c.last_inbound_at,
+          use: "template",
+          // O mesmo código que a recusa chega pelo webhook de status — é a
+          // prova de que a recusa de hoje é a falha silenciosa de ontem.
+          codigo_plataforma: "131047",
+        },
+        ctx.requestId,
+        traduzir(
+          "Janela de 24 horas fechada: texto livre é recusado pela plataforma (131047). Envie um modelo aprovado ou aguarde o cliente escrever.",
+          ctx.idioma ?? "pt-BR",
+        ),
+      );
+    }
   }
 
   if (
@@ -471,8 +541,56 @@ export async function sendMessageHandler(
     );
   }
 
+  // Só `media_url` (sem `media_storage_path`) é baixada pelo gateway: é esse o
+  // envio que precisa da guarda anti-SSRF, e antes de a linha existir.
+  if (input.media_url && !input.media_storage_path) {
+    try {
+      await assertUrlDeMidiaSegura(input.media_url);
+    } catch (erro) {
+      throw new ApiError(
+        422,
+        "unsafe_media_url",
+        { motivo: erro instanceof Error ? erro.message : "unsafe_url" },
+        ctx.requestId,
+        "media_url recusada: o endereço não pode ser baixado pelo servidor.",
+      );
+    }
+  }
+
   let outboundBody = input.body ?? null;
   let outboundMetadata: Record<string, unknown> = { ...(input.metadata ?? {}) };
+
+  // ─── Assinatura do emissor (#2066) ─────────────────────────────────────────
+  // Opt-in por organização (`organizations.settings.assinatura_mensagens`). A
+  // assinatura entra SÓ no texto enviado ao canal (corpo de texto e legenda de
+  // mídia) — o que fica gravado em `messages.body` é o que o emissor escreveu
+  // (insertRow abaixo usa `input.body`). Automação e sistemas externos
+  // (`automation`/`system`) ficam de fora, como o relato pede. Humano ganha o
+  // nome do atendente com iniciais em maiúsculo; a IA, o nome configurável.
+  const origemDoEmissor = origemDaMensagem(ctx.actor);
+  let assinatura: string | null = null;
+  if (origemDoEmissor === "user" || origemDoEmissor === "ai") {
+    const { data: orgAssinatura } = await supabase
+      .from("organizations")
+      .select("settings")
+      .eq("id", ctx.organization_id)
+      .maybeSingle();
+    const configAss = configAssinatura(orgAssinatura?.settings);
+    const coberta =
+      (origemDoEmissor === "user" && configAss.humanos) ||
+      (origemDoEmissor === "ai" && configAss.ia);
+    if (coberta) {
+      let nomeDoAtendente: string | null = null;
+      if (origemDoEmissor === "user" && ctx.actor.type === "user") {
+        nomeDoAtendente = (await nomesDosAtendentes([ctx.actor.id])).get(ctx.actor.id) ?? null;
+      }
+      assinatura = linhaDeAssinatura(configAss, origemDoEmissor, nomeDoAtendente);
+    }
+  }
+
+  /** O corpo com a assinatura, quando ela se aplica a esta origem e há texto. */
+  const corpoDoCanal = (texto: string | null): string | null =>
+    aplicarAssinatura(assinatura, texto) ?? null;
 
   if (input.type === "contact") {
     const sharedId = input.metadata?.shared_contact_id;
@@ -600,6 +718,27 @@ export async function sendMessageHandler(
     citada = alvo as { id: string; external_id: string | null };
   }
 
+  // ─── "Em nome de" (#1613): o CTX é a única porta ───────────────────────────
+  //
+  // O campo existe no input — quem o envia o declara —, mas gravar autoria é
+  // decisão do ctx, que só a rota REST preenche, depois de checar o escopo
+  // `messages:on_behalf` na linha do token e o membership no banco. O MESMO
+  // input atravessa as tools MCP, que não têm escopo nenhum: sem esta recusa,
+  // uma chamada por lá escreveria autoria de pessoa sem que ninguém a tivesse
+  // concedido. Falha FECHADA — recusa alto, nunca grava por omissão.
+  if (input.on_behalf_of_user_id && ctx.onBehalfOf?.userId !== input.on_behalf_of_user_id) {
+    throw new ApiError(
+      403,
+      "forbidden",
+      undefined,
+      ctx.requestId,
+      traduzir(
+        "Envio em nome de outro usuário exige o escopo messages:on_behalf.",
+        ctx.idioma ?? "pt-BR",
+      ),
+    );
+  }
+
   const insertRow = {
     ...(ctx.internalMessageId ? { id: ctx.internalMessageId } : {}),
     organization_id: c.organization_id,
@@ -619,10 +758,26 @@ export async function sendMessageHandler(
     media_size_bytes: input.media_size_bytes ?? null,
     sent_via: origemDaMensagem(ctx.actor),
     sent_by_user_id: ctx.actor.type === "user" ? ctx.actor.id : null,
+    // A PESSOA, não o token (#1613). Só chega aqui pelo ctx validado na rota
+    // — ver a recusa acima —, e fica na coluna para consulta e auditoria.
+    sent_on_behalf_of_user_id: ctx.onBehalfOf?.userId ?? null,
     sent_at: now,
     metadata: {
       ...(input.metadata ?? {}),
       ...(ctx.actor.type === "ai_agent" ? { ai_actor_id: ctx.actor.id } : {}),
+      // Os dois nomes viajam GRAVADOS porque o balão não faz join: "Fulano ·
+      // via {token}" é desenhado da própria linha. Vêm DEPOIS de
+      // `input.metadata` de propósito — metadata é entrada do cliente, e
+      // deixá-lo por último seria autorizar o cliente a forjar o emissor.
+      ...(ctx.onBehalfOf
+        ? {
+            sent_on_behalf: {
+              user_id: ctx.onBehalfOf.userId,
+              user_name: ctx.onBehalfOf.userName ?? null,
+              token_name: ctx.onBehalfOf.tokenName ?? null,
+            },
+          }
+        : {}),
     },
   };
 
@@ -708,6 +863,22 @@ export async function sendMessageHandler(
         status: "failed",
         error_code: "channel_archived",
         error_message: "Este número foi excluído da Central de Conexões.",
+      })
+      .eq("id", message.id)
+      .select(MSG_COLS)
+      .maybeSingle();
+    if (updated) message = updated as unknown as Message;
+  } else if (canalDesativado(c.channel_sessions?.metadata)) {
+    // Canal DESATIVADO pelo operador: a lei é não entrar na inbox — e ela vale
+    // nos dois sentidos. `failed` terminal como no arquivado (fila implicaria
+    // "vai sair quando der", e por este canal não sai enquanto desligado).
+    // Reativar volta a enviar sem reimportar nada.
+    const { data: updated } = await supabase
+      .from("messages")
+      .update({
+        status: "failed",
+        error_code: "channel_disabled",
+        error_message: "Este canal está desativado. Reative-o na Central de Conexões para voltar a enviar.",
       })
       .eq("id", message.id)
       .select(MSG_COLS)
@@ -850,10 +1021,34 @@ export async function sendMessageHandler(
             url: signed.signedUrl,
             mime: input.media_mime ?? "application/octet-stream",
             filename,
-            caption: input.body ?? null,
+            caption: corpoDoCanal(input.body ?? null),
           },
           // O id que a PLATAFORMA conhece, lido da linha citada agora — não uma
           // cópia guardada no envio, que poderia divergir da linha.
+          replyToExternalId: citada?.external_id ?? null,
+        }));
+      } else if (input.media_url) {
+        // A spec da proposta comercial já previa isto ("Enviar | sendFile com
+        // media_url") e nunca chegou a ser ligado: um envio só com `media_url`
+        // (sem `media_storage_path` — que é só para arquivo já dentro da
+        // PRÓPRIA conversa, ver `isMediaPathOwnedBy` acima) caía no `else` de
+        // texto puro, com corpo vazio — nenhum arquivo saía. A URL já passou
+        // pela guarda anti-SSRF antes de a linha existir
+        // (`assertUrlDeMidiaSegura`): ela chega também pela API pública e
+        // pelo MCP, e quem a baixa é o gateway, de dentro da rede do servidor.
+        await checkBoundary();
+        ({ externalId } = await adapter.send({
+          beforeSend: checkBoundary,
+          organizationId: ctx.organization_id,
+          sessionRef: resolveSessionRef(c.channel_sessions),
+          to: chatId,
+          providerConversationId: c.provider_conversation_id,
+          kind: input.type,
+          media: {
+            url: input.media_url,
+            mime: input.media_mime ?? "application/octet-stream",
+            caption: corpoDoCanal(input.body ?? null),
+          },
           replyToExternalId: citada?.external_id ?? null,
         }));
       } else if (input.type === "contact") {
@@ -894,7 +1089,7 @@ export async function sendMessageHandler(
           to: chatId,
           providerConversationId: c.provider_conversation_id,
           kind: input.type,
-          body: input.body ?? "",
+          body: corpoDoCanal(input.body ?? "") ?? "",
           replyToExternalId: citada?.external_id ?? null,
         }));
       }
@@ -909,31 +1104,39 @@ export async function sendMessageHandler(
         message=await recordApprovedReplyReceiptSupabase(supabase,ctx.approvedReply,message.id,externalId,
           externalId?(adapter.echoExternalIds?.({externalId,recipient:chatId})??[externalId]):[]) as unknown as Message;
       } else {
-      await removerEcoDoProprioEnvio(
-        supabase,
-        ctx.organization_id,
-        c.id,
-        message.id,
-        externalId,
-        externalId
-          ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId])
-          : [],
-      );
-      const { data: updated } = await supabase
-        .from("messages")
-        .update({
-          status: "sent",
-          external_id: externalId,
-          ack: 0,
-          // Colunas só do template — é o que responde custo e conformidade de
-          // janela depois, sem varrer jsonb.
-          ...(input.type === "template"
-            ? { template_name: input.template_name, template_language: input.template_language }
-            : {}),
-        })
-        .eq("id", message.id)
-        .select(MSG_COLS)
-        .maybeSingle();
+      const candidatosDoEco = externalId
+        ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId])
+        : [];
+      const limparEco = () =>
+        removerEcoDoProprioEnvio(supabase, ctx.organization_id, c.id, message.id, externalId, candidatosDoEco);
+      const marcarEnviada = (comId: boolean) =>
+        supabase
+          .from("messages")
+          .update({
+            status: "sent",
+            ...(comId ? { external_id: externalId } : {}),
+            ack: 0,
+            // Colunas só do template — é o que responde custo e conformidade de
+            // janela depois, sem varrer jsonb.
+            ...(input.type === "template"
+              ? { template_name: input.template_name, template_language: input.template_language }
+              : {}),
+          })
+          .eq("id", message.id)
+          .select(MSG_COLS)
+          .maybeSingle();
+      await limparEco();
+      let { data: updated, error: erroAoMarcar } = await marcarEnviada(true);
+      // O eco que o webhook inseriu ENTRE a limpeza e este UPDATE já ocupa o id
+      // (o eco grava a mesma forma que o envio — #1855), e o unique recusa. É a
+      // mesma recusa que o watchdog trata em `markRedriveSent`: limpar de novo e
+      // carimbar outra vez; se ainda colidir, a mensagem SAIU e fica `sent` sem
+      // o id — nunca `queued`, que é pedir para ser reenviada.
+      if (erroAoMarcar?.code === "23505") {
+        await limparEco();
+        ({ data: updated, error: erroAoMarcar } = await marcarEnviada(true));
+        if (erroAoMarcar?.code === "23505") ({ data: updated } = await marcarEnviada(false));
+      }
       if (updated) message = updated as unknown as Message;
       }
     } catch (err) {
@@ -979,7 +1182,28 @@ export async function sendMessageHandler(
         .eq("id", message.id)
         .select(MSG_COLS)
         .maybeSingle();
-      if (updated) message = updated as unknown as Message;
+      if (updated) {
+        message = updated as unknown as Message;
+        // A linha passou a `failed` — é AGORA que o integrador tem de saber
+        // (#1614). Este é o caminho das falhas de PRÉ-VOO do envio; a recusa
+        // que chega depois, pelo webhook de status, emite pelo outro.
+        await emitirFalhaDeEntrega(supabase, {
+          organizationId: ctx.organization_id,
+          source: "messages-send",
+          requestId: ctx.requestId,
+          falha: {
+            message_id: message.id,
+            conversation_id: c.id,
+            contact_id: c.contact_id,
+            contact: c.contacts?.phone_number ?? null,
+            sent_via: message.sent_via ?? origemDaMensagem(ctx.actor),
+            erro: {
+              codigo: message.error_code ?? code,
+              titulo: message.error_message ?? msg,
+            },
+          },
+        });
+      }
     }
   }
 
@@ -1035,14 +1259,22 @@ export async function sendMessageHandler(
 
   }
   const a = actorAuditPayload(ctx.actor);
+  // Dois atores, uma linha (#1613): o `actor_user_id` continua sendo quem
+  // AUTENTICOU — nulo num envio por token, como sempre foi —, o token vai no
+  // `actor_api_token_id`, e a pessoa em nome de quem ele enviou fica em
+  // `metadata.on_behalf_of_user_id`. A pessoa é uma alegação do token, não uma
+  // identidade provada: pô-la na coluna de autor faria o log dizer que ela
+  // agiu, quando ninguém a autenticou nesta chamada.
+  const emNomeDe = ctx.onBehalfOf ? { on_behalf_of_user_id: ctx.onBehalfOf.userId } : {};
   await audit({
     action: "message.sent",
     actorUserId: a.actorUserId,
+    actorApiTokenId: ctx.onBehalfOf ? apiTokenIdDoActor(ctx.actor) : undefined,
     organizationId: c.organization_id,
     resourceType: "message",
     resourceId: message.id,
     requestId: ctx.requestId,
-    metadata: { ...a.metadataActor, status: message.status, type: message.type },
+    metadata: { ...a.metadataActor, ...emNomeDe, status: message.status, type: message.type },
   });
 
   await supabase
@@ -1051,7 +1283,7 @@ export async function sendMessageHandler(
       p_entity_kind: "message",
       p_entity_id: message.id,
       p_payload: { status: message.status, conversation_id: c.id },
-      p_metadata: { request_id: ctx.requestId, ...a.metadataActor },
+      p_metadata: { request_id: ctx.requestId, ...a.metadataActor, ...emNomeDe },
       p_organization_id: c.organization_id,
     })
     .then(({ error }) => {

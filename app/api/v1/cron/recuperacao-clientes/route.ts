@@ -8,7 +8,7 @@
  * nunca é varrida aqui — só quem pediu recorrência automática.
  *
  * A idempotência do dia não depende deste cron rodar exatamente uma vez: é o
- * índice único `(organization_id, rodada_data)` (migration 0417) que barra a
+ * índice único `(organization_id, rodada_data)` (migration 0559) que barra a
  * segunda rodada, dentro de `abrirRodada` — reinício do worker ou dois nós no
  * mesmo minuto não duplicam o disparo.
  */

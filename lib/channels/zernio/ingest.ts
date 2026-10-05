@@ -41,7 +41,7 @@ import {
 
 import { aplicarEfeitosPosEntrada } from "../pos-entrada";
 
-import { completarLocalizacao } from "./localizacao";
+import { completarLocalizacao, pedirNovaBuscaDoPino, pinoFicouSemCoordenadas } from "./localizacao";
 import { parseZernioInbound, type ZernioIdentity, type ZernioInboundMessage } from "./webhook";
 
 export interface ZernioIngestResult {
@@ -109,6 +109,7 @@ export async function ingestZernioInbound(
       .not("status", "in", "(read)")
       .select("id");
     const afetadas = (data ?? []).length;
+    await carimbarHoraDoDesfecho(admin, input, msg);
     return afetadas > 0
       ? { status: "ingested", reason: `status_${msg.status}` }
       : { status: "ignored", reason: "mensagem_desconhecida" };
@@ -202,6 +203,9 @@ export async function ingestZernioInbound(
           inseridaNaExistente,
         );
       }
+      if (!input.socialMessage && pinoFicouSemCoordenadas(msg)) {
+        await pedirNovaBuscaDoPino(admin, input.organizationId, inseridaNaExistente, msg);
+      }
       await efeitosDaEntrada(
         admin,
         input,
@@ -277,6 +281,9 @@ export async function ingestZernioInbound(
   if (msg.attachments[0]?.url) {
     await pedirPersistenciaDaMidia(admin, input.organizationId, conversationId, inserted);
   }
+  if (!input.socialMessage && pinoFicouSemCoordenadas(msg)) {
+    await pedirNovaBuscaDoPino(admin, input.organizationId, inserted, msg);
+  }
   await efeitosDaEntrada(admin, input, msg, contactId, conversationId, inserted);
 
   // SAÍDA feita por fora do CRM = uma pessoa respondeu o cliente à mão (celular,
@@ -310,7 +317,12 @@ export async function ingestZernioInbound(
  */
 async function efeitosDaEntrada(
   admin: SupabaseClient,
-  input: { organizationId: string; channelSessionId: string; requestId?: string },
+  input: {
+    organizationId: string;
+    channelSessionId: string;
+    requestId?: string;
+    socialMessage?: Pick<SocialMessage, "platform">;
+  },
   msg: ZernioInboundMessage,
   contactId: string,
   conversationId: string,
@@ -340,6 +352,9 @@ async function efeitosDaEntrada(
     nomeDoContato: msg.identity.displayName,
     requestId: input.requestId,
     origem: "zernio_webhook",
+    // A rede é o canal que os dois ramos acima já gravaram em
+    // `conversations.channel`; sem ela o negócio nasce como WhatsApp.
+    canal: input.socialMessage?.platform,
   });
 }
 
@@ -752,3 +767,49 @@ async function upsertSocialContact(
   if (error || !data) throw new Error("social_contact_create_failed");
   return data.id as string;
 }
+
+/**
+ * A HORA do desfecho — `delivered_at` e `read_at` — e não só o estado.
+ *
+ * O canal oficial direto já carimbava as duas (`lib/channels/meta/status-update.ts`);
+ * por aqui só o `status` mudava, e as colunas ficavam nulas para sempre: a
+ * conversa mostrava o tique certo, mas "quanto o cliente demorou para ler" não
+ * tinha como ser medido. Medido numa instalação real (24/09/2026): 41 mensagens
+ * entregues no dia, nenhuma com `delivered_at`.
+ *
+ * Cada coluna é gravada UMA vez (`is null`): o primeiro evento que a alcança é o
+ * que vale. Por isso é um update à parte do de `status` — aquele recusa rebaixar
+ * `read` para `delivered`, e um `delivered` atrasado ainda precisa carimbar a
+ * entrega. Um `read` sem `delivered` antes (a ordem do webhook não é garantida)
+ * carimba as duas com a mesma hora: quem leu, recebeu.
+ *
+ * Best-effort: o carimbo é métrica; falhar aqui não pode derrubar a ingestão.
+ */
+async function carimbarHoraDoDesfecho(
+  admin: SupabaseClient,
+  input: { organizationId: string; channelSessionId: string },
+  msg: ZernioInboundMessage,
+): Promise<void> {
+  const colunas =
+    msg.status === "read" ? (["delivered_at", "read_at"] as const)
+    : msg.status === "delivered" ? (["delivered_at"] as const)
+    : [];
+  const quando = msg.statusAt ?? new Date().toISOString();
+  for (const coluna of colunas) {
+    const { error } = await admin
+      .from("messages")
+      .update({ [coluna]: quando })
+      .eq("organization_id", input.organizationId)
+      .eq("channel_session_id", input.channelSessionId)
+      .eq("external_id", msg.externalId)
+      .is(coluna, null);
+    if (error) {
+      logger.warn("[zernio] hora do desfecho não gravada", {
+        organization_id: input.organizationId,
+        coluna,
+        erro: error.message,
+      });
+    }
+  }
+}
+

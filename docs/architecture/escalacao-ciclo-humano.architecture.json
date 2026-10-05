@@ -344,7 +344,7 @@
       "col": 3,
       "type": "lib",
       "label": "lib/ai/handoff/aviso-ao-lead.ts",
-      "sublabel": "o mesmo texto pelo sendMessageHandler (mundo supabase-js)"
+      "sublabel": "o mesmo texto pelo sendMessageHandler (mundo supabase-js) — só se a IA falou na conversa (ou a passagem veio do MCP externo), um por 24 h sem contar aviso failed"
     },
     {
       "id": "orquestrador",
@@ -393,6 +393,14 @@
       "type": "lib",
       "label": "lib/escalacao/aviso-ao-suporte.ts",
       "sublabel": "consome ai.case_opened/closed — nunca devolve error, nunca dorme"
+    },
+    {
+      "id": "casoNaCentral",
+      "lane": "motor",
+      "col": 5,
+      "type": "lib",
+      "label": "lib/escalacao/caso-na-central.handler.ts",
+      "sublabel": "o caso que espera uma pessoa entra no sino na abertura; sai quando fecha"
     },
     {
       "id": "avisoSuporteTexto",
@@ -504,7 +512,7 @@
       "col": 2,
       "type": "frontend",
       "label": "Configurações › Distribuição de atendimento",
-      "sublabel": "settings.routing.handoff_return_after_minutes — null = IA-06 (nunca)"
+      "sublabel": "settings.routing.handoff_return_after_minutes — null = IA-06 (nunca); settings.routing.manual_reply_silence_minutes — null = 60 min"
     },
     {
       "id": "presenca_emissor",
@@ -552,7 +560,7 @@
       "col": 1,
       "type": "api",
       "label": "GET/PATCH /api/v1/ai/jev",
-      "sublabel": "admin liga, desliga e troca o modo; ligar exige chave validada e, na 1ª vez, o aceite; audit ai.jev.*"
+      "sublabel": "admin liga, desliga e troca o estado de cada tarefa (o clima também pelo modo); ligar exige chave validada e, na 1ª vez, o aceite; audit ai.jev.* com a tarefa"
     },
     {
       "id": "jevConfig",
@@ -560,7 +568,7 @@
       "col": 1,
       "type": "database",
       "label": "organizations.settings.jev",
-      "sublabel": "ligado · modo (observacao | decide) · aceite {em, por} — Zod em lib/ai/decisao/config.ts, sem migration"
+      "sublabel": "ligado (mestre) · tarefas.<id>.estado · modo (o clima, na língua da onda 1) · aceite {em, por, alcance} — Zod em lib/ai/decisao/config.ts, estado efetivo em tarefas.ts, sem migration"
     },
     {
       "id": "jevChave",
@@ -576,7 +584,7 @@
       "col": 1,
       "type": "external",
       "label": "Jev (System One) — lib/ai/decisao",
-      "sublabel": "medirClima: cada mensagem recebida, sozinha e sem o histórico, passada por scrubMessage; teto de 1,5 s; disjuntor por organização; nunca lança"
+      "sublabel": "medirClima: cada mensagem recebida, sozinha e sem o histórico, passada por scrubMessage; teto de 1,5 s; disjuntor por organização (e por tarefa na pergunta recusada); nunca lança"
     },
     {
       "id": "jevLlmCalls",
@@ -593,6 +601,38 @@
       "type": "table",
       "label": "messages.metadata (sentiment_*)",
       "sublabel": "sentiment_score e sentiment_engine (quem decidiu) + sentiment_jev_score — a matéria da concordância"
+    },
+    {
+      "id": "jevManipulacao",
+      "lane": "motor",
+      "col": 2,
+      "type": "service",
+      "label": "inbound-turn: camada anti-manipulação (jailbreak_detect)",
+      "sublabel": "3ª perna do Promise.all do classificador de sempre — só com a camada ligada e fora da prévia; observando vale a IA de sempre, decidindo o maior dos dois, sem a IA de sempre 'none' (lib/ai/decisao/manipulacao.ts)"
+    },
+    {
+      "id": "jevObservacoes",
+      "lane": "dados",
+      "col": 5,
+      "type": "table",
+      "label": "jev_observacoes (0421)",
+      "sublabel": "por resposta do Jev: tarefa, estado, rótulo dele × rótulo de hoje, concordou (gerada), ponteiros sem FK, sem texto — poda de 90 dias no cron data-retention"
+    },
+    {
+      "id": "jevPedidos",
+      "lane": "motor",
+      "col": 7,
+      "type": "service",
+      "label": "worker de clima: os pedidos do cliente (lib/ai/decisao/pedidos.ts + workers/ai-sentiment-worker.pedidos.ts)",
+      "sublabel": "chamada própria, em paralelo à do clima — só onde a regra de hoje (pedido explícito de pessoa, palavras de passagem de quem pode atender, descadastro pedido ou provável) disse não e o turno do agente rodaria (o portão do dreno, haQuemAtendaASessao); corte 0,9; em 'Avisar a equipe' abre UM aviso por conversa e pedido (índice único), depois de saber o que o clima fez; nunca passa a conversa, bloqueia ou cala"
+    },
+    {
+      "id": "jevFollowup",
+      "lane": "motor",
+      "col": 8,
+      "type": "service",
+      "label": "followup-turn: o passo 'Classificar (IA)' do follow-up (lib/ai/decisao/followup.ts)",
+      "sublabel": "só com resposta ao envio do fluxo: a mesma pergunta da IA de sempre (followup_classify), em paralelo — as saídas do passo como opções, sem 'nenhuma', só o texto digitado pelo cliente por scrubMessage (mídia não sai); SÓ OBSERVA nesta versão: a saída que move o fluxo é sempre a da IA de sempre, e ninguém espera por ele"
     }
   ],
   "edges": [
@@ -984,7 +1024,7 @@
       "id": "e65",
       "from": "atendimentoManual",
       "to": "conversas",
-      "label": "bot_silenced_until = agora + PRAZO_DO_SILENCIO_MS (60 min), renovado a cada fala humana e NUNCA encurtando um silêncio maior, + last_handoff_reason — NÃO toca ai_authorized_at (a origem do lead é outro estado)"
+      "label": "bot_silenced_until = agora + prazo da empresa (manual_reply_silence_minutes; padrão PRAZO_DO_SILENCIO_MS, 60 min; falha ao ler = 60), renovado a cada fala humana e NUNCA encurtando um silêncio maior, + last_handoff_reason — NÃO toca ai_authorized_at (a origem do lead é outro estado)"
     },
     {
       "id": "e66",
@@ -1238,7 +1278,7 @@
       "id": "e102",
       "from": "jevConfig",
       "to": "sentimento",
-      "label": "o worker lê ligado e modo antes de medir"
+      "label": "o worker lê o estado da tarefa clima (interruptor, aceite, tarefas.clima ou modo) antes de medir"
     },
     {
       "id": "e103",
@@ -1311,6 +1351,126 @@
       "from": "orquestrador",
       "to": "passagemMontagem",
       "label": "sentiment_engine='jev' → '(percebido pelo Jev)' no aviso e no briefing — só a equipe lê (D11)"
+    },
+    {
+      "id": "e115",
+      "from": "jevConfig",
+      "to": "jevManipulacao",
+      "label": "o turno lê o estado da tarefa manipulacao (interruptor, aceite, tarefas.manipulacao) pelo pg.Pool"
+    },
+    {
+      "id": "e116",
+      "from": "jevManipulacao",
+      "to": "jev",
+      "label": "perguntarManipulacaoAoJev: a última mensagem, sem o histórico, passada por scrubMessage"
+    },
+    {
+      "id": "e117",
+      "from": "jev",
+      "to": "jevManipulacao",
+      "label": "none/low/high com a probabilidade — só SOMA, nunca rebaixa o nível da IA de sempre"
+    },
+    {
+      "id": "e118",
+      "from": "jevManipulacao",
+      "to": "jevObservacoes",
+      "label": "registrarManipulacaoDoJev: o par Jev × IA de sempre, amarrado a job_id e message_id"
+    },
+    {
+      "id": "e119",
+      "from": "jevManipulacao",
+      "to": "jevLlmCalls",
+      "label": "linha typesafe purpose jailbreak_detect (jev quando o sinal dele mudou o nível; senão jev_observacao)"
+    },
+    {
+      "id": "e120",
+      "from": "jevObservacoes",
+      "to": "jevRota",
+      "label": "concordância por tarefa, 30 dias, contada no banco — o laço de retorno da manipulação; nas tarefas em cascata, as mensagens em que o Jev percebeu o pedido, as conversas delas, e o 'Não roda' onde nenhum número tem atendente automático no ar (haQuemAtendaAOrganizacao) ou o atendimento é de um sistema de fora"
+    },
+    {
+      "id": "e121",
+      "from": "casos",
+      "to": "casoNaCentral",
+      "label": "ai.case_opened / ai.case_closed pelo event_log (o mesmo trigger da 0148)"
+    },
+    {
+      "id": "e122",
+      "from": "casoNaCentral",
+      "to": "central",
+      "label": "abre kind='other' → agent_case com texto genérico; resolve quando o caso fecha"
+    },
+    {
+      "id": "e123",
+      "from": "central",
+      "to": "chamados",
+      "label": "o botão do aviso abre /app/ai/cases?caso=<id> — a pessoa responde o caso"
+    },
+    {
+      "id": "e124",
+      "from": "sentimento",
+      "to": "jevPedidos",
+      "label": "a mesma mensagem, com a regra de hoje rodada e os fatos do turno lidos (o portão do dreno para o número, elegibilidade, contato bloqueado ou com uma pessoa em outra conversa, grupo)"
+    },
+    {
+      "id": "e125",
+      "from": "jevPedidos",
+      "to": "jev",
+      "label": "observarPedidos: só as perguntas que a regra não pegou, numa chamada só, a mensagem sem o histórico, por scrubMessage"
+    },
+    {
+      "id": "e126",
+      "from": "jevPedidos",
+      "to": "jevObservacoes",
+      "label": "uma linha por pergunta: tarefa humano/opt_out, sim/não pelo corte, rótulo de hoje 'nao' por construção"
+    },
+    {
+      "id": "e127",
+      "from": "jevPedidos",
+      "to": "jevLlmCalls",
+      "label": "linha typesafe purpose jev_pedidos (jev_observacao; jev em 'Avisar a equipe') — o nome dela em Execuções é 'Perceber pedidos do cliente'"
+    },
+    {
+      "id": "e128",
+      "from": "jevPedidos",
+      "to": "central",
+      "label": "'Avisar a equipe' (0500): kind jev_pedido_de_humano / jev_parar_de_receber, ref_kind conversation, warn — o corpo NÃO leva a frase do cliente: a Central entrega body a qualquer agent"
+    },
+    {
+      "id": "e129",
+      "from": "atribuir",
+      "to": "central",
+      "label": "trg_fechar_avisos_do_jev_da_conversa (0500): encerrada, os dois avisos do Jev daquela conversa fecham; com uma pessoa (assumida, ou passada por qualquer caminho: last_handoff_at, robô calado), só o de falar com uma pessoa — o de parar de receber pede à equipe assumir E pedir o PARAR, e segue aberto; trg_fechar_aviso_do_jev_ao_bloquear: o contato bloqueado fecha o de parar de receber (o laço de retorno dele)"
+    },
+    {
+      "id": "e130",
+      "from": "jevConfig",
+      "to": "jevFollowup",
+      "label": "o turno do follow-up lê o estado da tarefa followup (interruptor, aceite, tarefas.followup) pelo pg.Pool — um 'decidindo' gravado vale observando"
+    },
+    {
+      "id": "e131",
+      "from": "jevFollowup",
+      "to": "jev",
+      "label": "consultarJevNoFollowup: a resposta do cliente ao envio do fluxo, sozinha, e as saídas + a dica do passo (texto da empresa)"
+    },
+    {
+      "id": "e132",
+      "from": "jevFollowup",
+      "to": "jevObservacoes",
+      "label": "registrarFollowupDoJev: a saída dele × a da IA de sempre, amarrada a job_id e ao message_id da resposta — a da IA só entra DEPOIS de concluir o passo (o retry não conta em dobro; sem ela, fica sem par e só a repetição do MESMO job a completa: outro passo ou fluxo sobre a mesma mensagem perguntou entre outras saídas)"
+    },
+    {
+      "id": "e133",
+      "from": "jevFollowup",
+      "to": "jevLlmCalls",
+      "label": "linha typesafe purpose followup_classify, origem jev_observacao — no mesmo comando da observação"
+    },
+    {
+      "id": "e134",
+      "from": "prazoConfig",
+      "to": "atendimentoManual",
+      "label": "manual_reply_silence_minutes (5 min a 24 h; null = 60): quanto a IA fica calada depois de uma resposta pelo celular — lido a cada pausa por lerPrazoDoSilencioManualMinutos (diagnóstico de @gaberaldo-svg, #2005)"
     }
   ],
   "cards": [

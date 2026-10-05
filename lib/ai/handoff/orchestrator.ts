@@ -263,6 +263,7 @@ export async function triggerHandoff(
             conversationId: input.conversationId,
             contactId,
             reason: input.reason,
+            origem: input.origem,
             serviceBoundary: input.serviceBoundary,
           });
 
@@ -498,7 +499,9 @@ export async function triggerHandoff(
               organization_id: input.organizationId,
               kind: "handoff",
               severity: "critical",
-              title: "Atendimento automático parou — assumir a conversa",
+              // No idioma da ORGANIZAÇÃO, como o corpo: o título da Central sai
+              // como foi gravado (nunca passa por t() na tela).
+              title: traduzir("Atendimento automático parou — assumir a conversa", idiomaDaOrg),
               body: corpo,
               ref_kind: "conversation",
               ref_id: input.conversationId,

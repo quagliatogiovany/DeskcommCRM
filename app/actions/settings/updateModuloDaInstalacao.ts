@@ -5,10 +5,10 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { audit } from "@/lib/audit";
-import { requirePlatformAdmin } from "@/lib/auth/requirePlatformAdmin";
+import { escritaDeAdminOuRecusa } from "@/lib/auth/escritaDeAdminOuRecusa";
 import {
   MODULOS_AINDA_NAO_LIGAVEIS,
-  MODULOS_OPCIONAIS,
+  MODULOS_OPCIONAIS_POR_FLAG,
   gravarModulo,
   moduloLigado,
 } from "@/lib/instalacao/modulos";
@@ -16,8 +16,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export type UpdateModuloResult = { ok: true } | { ok: false; error: string };
 
+// Só módulos por FLAG passam por aqui — um módulo de tabela (ADR-0002, ex. "honorarios")
+// se instala em `/admin/modulos` via `fn_modulo_instalar`, nunca por este action.
 const entradaSchema = z.object({
-  modulo: z.enum(MODULOS_OPCIONAIS),
+  modulo: z.enum(MODULOS_OPCIONAIS_POR_FLAG),
   ligado: z.boolean(),
 });
 
@@ -37,7 +39,9 @@ const entradaSchema = z.object({
 export async function updateModuloDaInstalacao(
   input: z.infer<typeof entradaSchema>,
 ): Promise<UpdateModuloResult> {
-  const { user } = await requirePlatformAdmin();
+  const escrita = await escritaDeAdminOuRecusa();
+  if (!escrita.ok) return escrita;
+  const { user } = escrita.ctx;
 
   const parsed = entradaSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "invalid_input" };

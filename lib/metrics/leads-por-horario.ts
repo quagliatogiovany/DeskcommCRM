@@ -1,6 +1,6 @@
 /**
  * Heatmap de quando o lead entra em contato (dia da semana × hora) — shape cru
- * devolvido por `fn_leads_por_horario` (migration 0418) e as funções puras que
+ * devolvido por `fn_leads_por_horario` (migration 0560) e as funções puras que
  * a tela usa para desenhá-lo.
  *
  * A função SQL só devolve os baldes com dado; `gradeCompleta` preenche os 168

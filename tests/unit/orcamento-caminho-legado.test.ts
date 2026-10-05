@@ -127,6 +127,7 @@ function makeAdminStub(
             bot_silenced_until: null,
             last_handoff_at: null,
             assignee_kind: "ai",
+            organizations: { status: "active" },
             contacts: {
               id: CONTACT_ID,
               display_name: null, // sem PII em teste (LGPD)
@@ -143,7 +144,7 @@ function makeAdminStub(
                 organization_id: ORG_ID,
                 model: "anthropic/claude-sonnet-4-6",
                 system_prompt: "Você é um atendente.",
-                config: { confidence_threshold: 0 },
+                config: {},
                 guardrails: {},
                 active_kb_version_id: "99999999-9999-4999-8999-999999999999",
                 is_active: true,

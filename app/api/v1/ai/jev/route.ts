@@ -8,7 +8,26 @@ import { requireSupportWrite } from "@/lib/impersonate/support";
  * de reserva? e, ligado, o que ele fez na semana e quanto concordou com a IA de
  * sempre.
  *
- * PATCH liga, desliga e troca o modo. Ligar manda cada mensagem que o cliente
+ * GET também responde, por tarefa (`por_tarefa`, de `TAREFAS_DO_JEV`), o estado
+ * que vale agora, o que ela vira ao ligar o Jev (`ao_ligar`), se ela é nova —
+ * começou sozinha e ninguém escolheu ainda — e a concordância dela com a IA de
+ * sempre (`observacao`): a do clima, das notas em `messages.metadata`; a das
+ * outras, de `jev_observacoes` — e, nas tarefas em cascata, que só são
+ * perguntadas onde a regra de hoje disse não, em quantas mensagens o Jev
+ * percebeu o pedido que ela não reconheceu (`percebidos`, uma linha de
+ * `jev_observacoes` por mensagem), com as conversas mais recentes. E o que a
+ * impede de rodar: `sem_camada`, a tarefa acompanha uma camada de segurança que
+ * a organização desligou; `sem_roteador`, a do roteador numa empresa sem
+ * roteador de intenção ativo; `sem_atendente`, as de pedido numa empresa em que
+ * o atendimento automático não roda em número nenhum (ninguém no ar sem pausa,
+ * ou o atendimento com um sistema de fora) — o worker só as pergunta onde ele
+ * roda; `sem_fluxo`, a do follow-up numa empresa sem follow-up publicado com o
+ * passo "Classificar (IA)" e sem inscrição andando numa versão que o tenha.
+ *
+ * PATCH liga, desliga, troca o modo do clima (`modo`, o nome da onda 1) e o
+ * estado de uma tarefa (`tarefa` + `estado` — na em cascata, `decidindo` é o
+ * "Avisar a equipe" da tela; na que só observa, `decidindo` é recusado com
+ * `jev_tarefa_so_observa`). Ligar manda cada mensagem que o cliente
  * escreve, uma de cada vez e sem o resto da conversa, a um fornecedor nos EUA, então exige chave validada e, na primeira
  * vez, o aceite explícito do administrador (LGPD, D6), que fica gravado com
  * quem e quando. O interruptor mora em `organizations.settings.jev`
@@ -19,21 +38,56 @@ import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
+import { llmEdgeConfigFromEnv, temIaDeSempre } from "@/lib/agent-engine/edge/llm/credentials";
+import { camadasEfetivas } from "@/lib/agent-engine/guardrails/camadas-da-org";
+import { haQuemAtendaAOrganizacao } from "@/lib/ai/agents/quem-atende-a-sessao";
 import { credencialEmUsoPeloJev, PROVEDOR_DO_JEV } from "@/lib/ai/decisao/credencial";
-import { gravarConfigDoJev, lerConfigDoJev, type ConfigDoJev } from "@/lib/ai/decisao/config";
+import {
+  ESTADO_DO_MODO,
+  ESTADOS_DA_TAREFA,
+  gravarConfigDoJev,
+  idDaTarefaSchema,
+  lerConfigDoJev,
+  type ConfigDoJev,
+  type MudancaDaConfig,
+} from "@/lib/ai/decisao/config";
 import { CHAVES_DO_CLIMA, type MotorDoClima } from "@/lib/ai/decisao/metadados-do-clima";
+import {
+  estadoAoLigar,
+  estadoEfetivoDaTarefa,
+  estadoGravadoDaTarefa,
+  rotuloDaChamadaDoJev,
+  TAREFA_DO_CLIMA,
+  TAREFAS_DO_JEV,
+  tarefaEhNova,
+  algumFluxoQueClassifica,
+  algumRoteadorQuePergunta,
+  INSCRICAO_ENCERRADA,
+  ROTEADOR_SOB_DEMANDA_SEM_IA,
+  TAREFA_DA_MANIPULACAO,
+  tarefaSemAtendente,
+  tarefaSemCamada,
+  tarefaSemFluxo,
+  tarefaSemRoteador,
+  type SemAtendente,
+} from "@/lib/ai/decisao/tarefas";
+import { CODIGOS_SEM_REDE } from "@/lib/ai/decisao/textos";
 import { DEFAULT_CLASSIFIER_MODEL } from "@/lib/ai/gateway";
 import { resolverModeloDoPonto } from "@/lib/ai/gateway-binding";
+import { REFERENCIAS_DE_AVISO } from "@/lib/ai/inbox-destino";
 import { PROVEDORES_DE_DECISAO } from "@/lib/ai/pontos/provedores";
-import { PONTOS_DO_JEV } from "@/lib/ai/pontos/registro";
 import { DEFAULT_SENTIMENT_THRESHOLD } from "@/lib/ai/prompts/sentiment";
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { roleAtLeast } from "@/lib/auth/types";
 import { traduzir } from "@/lib/i18n/dicionario";
+import { logger } from "@/lib/logger";
+import { aiDispatchModeSchema } from "@/lib/schemas/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +96,8 @@ const [JEV] = PROVEDORES_DE_DECISAO;
 const DIAS_DOS_NUMEROS = 7;
 const DIAS_DA_CONCORDANCIA = 30;
 const MENSAGENS_COMPARADAS_MAX = 500;
+/** Quantas conversas o cartão oferece por tarefa em cascata — as mais recentes. */
+const CONVERSAS_PERCEBIDAS_MAX = 5;
 /** O teto de linhas por resposta do PostgREST (`max_rows` em `supabase/config.toml`). */
 const PAGINA = 1000;
 // ponytail: 50 páginas = 50 mil execuções do Jev numa semana; acima disso os
@@ -49,11 +105,84 @@ const PAGINA = 1000;
 // migration) é o passo seguinte, quando alguma instalação chegar lá.
 const PAGINAS_MAX = 50;
 
-const TAREFAS = PONTOS_DO_JEV.flatMap((p) =>
-  p.decisaoRapida ? [{ id: p.id, rotulo: p.rotulo, oQueOJevFaz: p.decisaoRapida.oQueOJevFaz }] : [],
+/**
+ * Os pontos em que o Jev trabalha, no formato da onda 1. O cartão desta versão
+ * lê `por_tarefa`; este campo fica para a página da imagem anterior, aberta
+ * durante uma atualização ou um rollback, que ainda o lê.
+ */
+const TAREFAS = TAREFAS_DO_JEV.flatMap((t) =>
+  t.ponto ? [{ id: t.ponto, rotulo: t.rotulo, oQueOJevFaz: t.oQueFaz }] : [],
 );
 
+type Concordancia = {
+  dias: number;
+  comparadas: number;
+  concordaram: number;
+  /**
+   * Só o clima: a conta saiu das `MENSAGENS_COMPARADAS_MAX` mais recentes, e
+   * não do período inteiro. Sem isto, lado a lado com as outras tarefas (que
+   * contam os 30 dias no banco), "X de 500" lia-se como "o Jev mediu o clima em
+   * menos mensagens".
+   */
+  teto_da_amostra?: number;
+  /**
+   * Só a manipulação: em quantas das comparadas SÓ o Jev deu o alerta forte.
+   * É o que decidir muda nela (o maior dos dois vale), e a concordância exata
+   * de três níveis, dominada por "nenhum" dos dois lados, não mostra isso.
+   */
+  so_o_jev_alto?: number;
+};
+
+/**
+ * O que o cartão mostra de uma tarefa em cascata: em quantas MENSAGENS o Jev
+ * percebeu o pedido que a regra de hoje não reconheceu (a resposta dele passou
+ * do corte), e as conversas mais recentes delas. A unidade é a mensagem — uma
+ * linha de `jev_observacoes` por mensagem —, e não o pedido: o worker pergunta
+ * no `message.received`, antes da janela do turno, então duas frases naturais
+ * na mesma rajada contam duas, e a frase natural que chega antes de um pedido
+ * que a regra pega na mensagem seguinte conta uma. Por mensagem, as duas são
+ * verdade. O link sai pronto daqui: o navegador nunca monta endereço a partir
+ * de uma referência solta.
+ */
+type Percebidos = { dias: number; mensagens: number; conversas: Array<{ href: string; em: string }> };
+
+function porTarefa(
+  c: ConfigDoJev,
+  observacao: Readonly<Record<string, Concordancia>>,
+  percebidos: Readonly<Record<string, Percebidos>>,
+  camadas: ReturnType<typeof camadasEfetivas>,
+  temRoteadorQuePergunta: boolean,
+  semAtendente: SemAtendente | null,
+  temFluxoQueClassifica: boolean,
+) {
+  return TAREFAS_DO_JEV.map((t) => ({
+    id: t.id,
+    ponto: t.ponto ?? null,
+    rotulo: t.rotulo,
+    oQueFaz: t.oQueFaz,
+    estado: estadoEfetivoDaTarefa(c, t),
+    ao_ligar: estadoAoLigar(c, t),
+    novo: tarefaEhNova(c, t),
+    observacao: observacao[t.id] ?? null,
+    percebidos: percebidos[t.id] ?? null,
+    // A camada de segurança que ela acompanha está desligada: o turno não
+    // pergunta, e "observando" sem mais nada prometeria uma comparação que nunca vem.
+    sem_camada: tarefaSemCamada(t, camadas),
+    // Sem roteador ativo que o Jev possa perguntar (nenhum, ou sem intenções, ou
+    // com mais do que cabe), "observando" prometeria uma comparação que nunca vem.
+    sem_roteador: tarefaSemRoteador(t, temRoteadorQuePergunta),
+    // As de pedido, onde o atendimento automático não roda em número nenhum: o
+    // worker nunca as pergunta, e "Só observa" com "percebeu 0" mentiria.
+    sem_atendente: tarefaSemAtendente(t, semAtendente),
+    // A do follow-up sem follow-up publicado com o passo "Classificar (IA)":
+    // ninguém lê a resposta, e "observando" esperaria uma comparação que não vem.
+    sem_fluxo: tarefaSemFluxo(t, temFluxoQueClassifica),
+  }));
+}
+
 interface LinhaDaSemana {
+  /** O ponto de cada tarefa — a falha de uma só se supera com a medida da MESMA. */
+  purpose: string;
   provider: string;
   status: string;
   origem_da_escolha: string | null;
@@ -82,15 +211,20 @@ function numerosDaSemana(linhas: readonly LinhaDaSemana[]) {
   // a paginação, e mudar a ordem não pode trocar a falha que o cartão mostra.
   const maisNova = (atual: LinhaDaSemana | null, l: LinhaDaSemana) =>
     atual === null || Date.parse(l.created_at) > Date.parse(atual.created_at) ? l : atual;
-  const ultimaFalha = doJev.filter((l) => l.status === "erro").reduce<LinhaDaSemana | null>(maisNova, null);
-  const ultimoSucesso = medidas.reduce<LinhaDaSemana | null>(maisNova, null);
-  // Só a falha que o Jev ainda não superou (D3: só alarma o que pede ação). Um
-  // 429 passageiro seguido de mil medidas não é notícia pela semana inteira.
-  const falha =
-    ultimaFalha !== null &&
-    (ultimoSucesso === null || Date.parse(ultimaFalha.created_at) > Date.parse(ultimoSucesso.created_at))
-      ? ultimaFalha
-      : null;
+  // Só a falha que o Jev ainda não superou NAQUELA tarefa (D3: só alarma o que
+  // pede ação). Um 429 passageiro seguido de mil medidas não é notícia pela
+  // semana inteira; mas a medida do clima não supera a pergunta da manipulação
+  // que a API recusa (o disjuntor dessa falha é por tarefa).
+  const ultimaMedida = new Map<string, number>();
+  for (const m of medidas) {
+    ultimaMedida.set(m.purpose, Math.max(ultimaMedida.get(m.purpose) ?? 0, Date.parse(m.created_at)));
+  }
+  const naoSuperada = (f: LinhaDaSemana) => Date.parse(f.created_at) > (ultimaMedida.get(f.purpose) ?? 0);
+  // A cobertura em que nada saiu para a rede (sem chave, disjuntor aberto) não
+  // é falha nova: tomaria o lugar da que abriu o disjuntor, que diz o que fazer.
+  const falha = doJev
+    .filter((l) => l.status === "erro" && naoSuperada(l) && !CODIGOS_SEM_REDE.has(l.error_code ?? ""))
+    .reduce<LinhaDaSemana | null>(maisNova, null);
   return {
     numeros: {
       dias: DIAS_DOS_NUMEROS,
@@ -101,57 +235,84 @@ function numerosDaSemana(linhas: readonly LinhaDaSemana[]) {
         latencias.length === 0
           ? null
           : Math.round(latencias.reduce((a, b) => a + b, 0) / latencias.length),
-      // Só a que MEDIU: a reserva que também falhou não assumiu nada.
-      reservas: linhas.filter((l) => l.origem_da_escolha === "reserva_do_jev" && l.status === "ok")
-        .length,
+      // Só a que MEDIU: a reserva que também falhou não assumiu nada. No
+      // clima, a linha é a da IA de sempre (`ok`); no roteador decidindo, é a
+      // linha de erro do Jev (`lib/ai/decisao/roteador.ts`), gravada só quando
+      // a IA de sempre respondeu.
+      reservas: linhas.filter(
+        (l) => l.origem_da_escolha === "reserva_do_jev" && (l.status === "ok" || l.provider === PROVEDOR_DO_JEV),
+      ).length,
     },
-    ultima_falha: falha ? { motivo: falha.error_code, em: falha.created_at } : null,
+    // A tarefa, e não só o motivo: com três tarefas e um disjuntor por tarefa,
+    // "a pergunta foi recusada" não dizia qual parou.
+    ultima_falha: falha
+      ? {
+          motivo: falha.error_code,
+          em: falha.created_at,
+          tarefa: rotuloDaChamadaDoJev(falha.purpose),
+        }
+      : null,
   };
 }
 
 /**
- * A nota chamaria uma pessoa? O corte é `DEFAULT_SENTIMENT_THRESHOLD`
- * (`lib/ai/prompts/sentiment.ts:34`), o mesmo que `workers/ai-sentiment-worker.ts`
- * compara (`score < threshold`) para emitir `ai.sentiment_alert`.
- * ponytail: o limiar por agente (`config.sentiment_threshold`) não entra — não
- * tem tela que o grave hoje. Se ganhar, o worker passa a gravar o limiar usado
- * em `messages.metadata` e a conta lê de lá.
+ * O limiar COM O QUAL a nota foi cortada — lido da própria mensagem
+ * (`messages.metadata.sentiment_threshold`, que o worker passou a gravar na
+ * #2219), e não do fixo. É o `config.sentiment_threshold` do agente da
+ * conversa (tela desde o #2216): um agente em 0,1 tem a concordância dele
+ * medida contra 0,1. Mensagem antiga, gravada antes do #2219, não tem a chave:
+ * aí vale `DEFAULT_SENTIMENT_THRESHOLD`, o mesmo default do worker — e um valor
+ * fora da faixa 0–1 nunca corta no escuro.
  */
-const abaixo = (n: number) => n < DEFAULT_SENTIMENT_THRESHOLD;
+const limiarDa = (linha: { limiar?: unknown }): number =>
+  typeof linha.limiar === "number" && Number.isFinite(linha.limiar) && linha.limiar >= 0 && linha.limiar <= 1
+    ? linha.limiar
+    : DEFAULT_SENTIMENT_THRESHOLD;
+
+/** A nota chamaria uma pessoa? O worker decide por `score < limiar`. */
+const abaixo = (n: number, limiar: number) => n < limiar;
 
 /**
  * Concordância em observação: as duas notas caíram do MESMO LADO do corte que
  * decide a passagem para humano? É a pergunta que importa antes de deixar o Jev
- * decidir — "chamou uma pessoa quando a IA de sempre chamaria".
+ * decidir — "chamou uma pessoa quando a IA de sempre chamaria". O corte é o de
+ * CADA mensagem (o limiar por agente gravado na decisão), com o padrão como
+ * fallback para as antigas (issue #2219).
  */
-function concordancia(linhas: ReadonlyArray<{ nota: unknown; nota_do_jev: unknown }>) {
+function concordancia(
+  linhas: ReadonlyArray<{ nota: unknown; nota_do_jev: unknown; limiar?: unknown }>,
+): Concordancia {
   const pares = linhas.flatMap((l) =>
     typeof l.nota === "number" && typeof l.nota_do_jev === "number"
-      ? [[l.nota, l.nota_do_jev] as const]
+      ? [[l.nota, l.nota_do_jev, limiarDa(l)] as const]
       : [],
   );
   return {
     dias: DIAS_DA_CONCORDANCIA,
     comparadas: pares.length,
-    concordaram: pares.filter(([ia, jev]) => abaixo(ia) === abaixo(jev)).length,
+    concordaram: pares.filter(([ia, jev, limiar]) => abaixo(ia, limiar) === abaixo(jev, limiar)).length,
   };
 }
 
 /**
- * "Clientes irritados percebidos": conversas em que a nota DO JEV ficou abaixo
+ * "Clientes irritados percebidos": conversas em que a nota DO Jev ficou abaixo
  * do corte da passagem para humano. A nota dele, e não a que decidiu: em
  * observação quem decide é a IA de sempre, e o número do cartão ficaria em zero
  * enquanto o Jev percebe a irritação do mesmo jeito. Conversa, e não mensagem:
  * o cliente irritado que manda três mensagens é um cliente.
  */
-function irritadosPercebidos(linhas: ReadonlyArray<{ conversa: unknown; nota_do_jev: unknown }>): number {
+function irritadosPercebidos(
+  linhas: ReadonlyArray<{ conversa: unknown; nota_do_jev: unknown; limiar?: unknown }>,
+): number {
   return new Set(
-    linhas.flatMap((l) => (typeof l.nota_do_jev === "number" && abaixo(l.nota_do_jev) ? [l.conversa] : [])),
+    linhas.flatMap((l) =>
+      typeof l.nota_do_jev === "number" && abaixo(l.nota_do_jev, limiarDa(l)) ? [l.conversa] : [],
+    ),
   ).size;
 }
 
 function configPublica(c: ConfigDoJev) {
-  return { ligado: c.ligado, modo: c.modo, aceite: c.aceite };
+  return { ligado: c.ligado, modo: c.modo, modo_roteador: c.modo_roteador, aceite: c.aceite };
 }
 
 function diasAtras(dias: number): string {
@@ -172,7 +333,7 @@ export async function GET(): Promise<Response> {
     for (let pagina = 0; pagina < PAGINAS_MAX; pagina++) {
       const { data, error } = await db
         .from("llm_calls")
-        .select("provider, status, origem_da_escolha, error_code, cost_cents, latency_ms, created_at")
+        .select("purpose, provider, status, origem_da_escolha, error_code, cost_cents, latency_ms, created_at")
         .eq("organization_id", org.orgId)
         .gte("created_at", desde)
         .or(`provider.eq.${PROVEDOR_DO_JEV},origem_da_escolha.eq.reserva_do_jev`)
@@ -187,7 +348,99 @@ export async function GET(): Promise<Response> {
     return { linhas, erro: null };
   };
 
-  const [orgRes, credsRes, semana, comparadasRes, iaDeSempre, percebidasRes] = await Promise.all([
+  /**
+   * A concordância das tarefas que gravam em `jev_observacoes` — todas menos o
+   * clima, que a guarda nas notas das mensagens desde a onda 1. Contagem no
+   * banco (`head`), sem trazer linha: "sem par" (`concordou` nulo, a IA de
+   * sempre não decidiu) não entra no denominador.
+   */
+  const lerObservacoes = async (): Promise<{ porTarefa: Record<string, Concordancia>; erro: string | null }> => {
+    const desde = diasAtras(DIAS_DA_CONCORDANCIA);
+    const contar = (tarefa: string) =>
+      db
+        .from("jev_observacoes")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", org.orgId)
+        .eq("tarefa", tarefa)
+        .gte("created_at", desde);
+    const porTarefa: Record<string, Concordancia> = {};
+    // As em cascata não têm concordância: por construção, a regra de hoje disse
+    // não em toda mensagem em que o Jev foi perguntado (`lerPercebidos`).
+    for (const t of TAREFAS_DO_JEV.filter((x) => x.id !== TAREFA_DO_CLIMA.id && x.familia !== "cascata")) {
+      const daManipulacao = t.id === TAREFA_DA_MANIPULACAO.id;
+      const [comparadas, concordaram, soDoJev] = await Promise.all([
+        contar(t.id).not("concordou", "is", null),
+        contar(t.id).eq("concordou", true),
+        // `neq` também deixa de fora o "sem par" (`rotulo_atual` nulo).
+        daManipulacao ? contar(t.id).eq("rotulo_jev", "high").neq("rotulo_atual", "high") : null,
+      ]);
+      const erro = comparadas.error?.message ?? concordaram.error?.message ?? soDoJev?.error?.message;
+      if (erro) return { porTarefa, erro };
+      porTarefa[t.id] = {
+        dias: DIAS_DA_CONCORDANCIA,
+        comparadas: comparadas.count ?? 0,
+        concordaram: concordaram.count ?? 0,
+        ...(soDoJev ? { so_o_jev_alto: soDoJev.count ?? 0 } : {}),
+      };
+    }
+    return { porTarefa, erro: null };
+  };
+
+  /**
+   * As tarefas em cascata: as mensagens em que o Jev percebeu o pedido (passou
+   * do corte) nos últimos 30 dias, contadas no banco, e as conversas das mais
+   * recentes. ponytail: as conversas saem das 50 linhas mais recentes; com mais
+   * de 50 mensagens seguidas da mesma conversa, as outras só aparecem depois.
+   */
+  const lerPercebidos = async (): Promise<{ porTarefa: Record<string, Percebidos>; erro: string | null }> => {
+    const desde = diasAtras(DIAS_DA_CONCORDANCIA);
+    const doJev = (tarefa: string) =>
+      db
+        .from("jev_observacoes")
+        .select("conversation_id, created_at", { count: "exact" })
+        .eq("organization_id", org.orgId)
+        .eq("tarefa", tarefa)
+        .eq("rotulo_jev", "sim")
+        .gte("created_at", desde)
+        .order("created_at", { ascending: false })
+        .limit(50);
+    const porTarefa: Record<string, Percebidos> = {};
+    for (const t of TAREFAS_DO_JEV.filter((x) => x.familia === "cascata")) {
+      const { data, count, error } = await doJev(t.id);
+      if (error) return { porTarefa, erro: error.message };
+      const conversas: Percebidos["conversas"] = [];
+      const vistas = new Set<string>();
+      for (const linha of data ?? []) {
+        if (linha.conversation_id === null || vistas.has(linha.conversation_id)) continue;
+        vistas.add(linha.conversation_id);
+        conversas.push({ href: REFERENCIAS_DE_AVISO.conversation.href(linha.conversation_id), em: linha.created_at });
+        if (conversas.length === CONVERSAS_PERCEBIDAS_MAX) break;
+      }
+      porTarefa[t.id] = { dias: DIAS_DA_CONCORDANCIA, mensagens: count ?? 0, conversas };
+    }
+    return { porTarefa, erro: null };
+  };
+
+  /**
+   * Há quem atenda, sem pausa, em algum número da organização? — o portão que
+   * o worker pergunta antes dos pedidos, sem fixar o número. `null` quando não
+   * deu para saber (sem `SUPABASE_DB_URL`, o banco fora): aí o cartão não
+   * afirma "Não roda" — dizer que algo está parado sem ter lido mandaria a
+   * pessoa consertar o que está funcionando.
+   */
+  const lerQuemAtende = async (): Promise<boolean | null> => {
+    try {
+      return await haQuemAtendaAOrganizacao(getRequestPool(), org.orgId);
+    } catch (erro) {
+      logger.warn("[ai/jev] não deu para saber se há quem atenda na organização", {
+        organization_id: org.orgId,
+        erro: erro instanceof Error ? erro.name : typeof erro,
+      });
+      return null;
+    }
+  };
+
+  const [orgRes, credsRes, semana, comparadasRes, iaDeSempre, percebidasRes, observacoes, percebidos, camadasRes, roteadoresRes, haQuemAtenda, fluxosRes, versoesEmCursoRes, roteadorTemIaDeSempre] = await Promise.all([
     db.from("organizations").select("settings").eq("id", org.orgId).maybeSingle(),
     db
       .from("ai_provider_credentials")
@@ -201,7 +454,12 @@ export async function GET(): Promise<Response> {
     // `metadata ? 'sentiment_jev_score'` (migration) quando pesar.
     db
       .from("messages")
-      .select(`nota:metadata->${CHAVES_DO_CLIMA.nota}, nota_do_jev:metadata->${CHAVES_DO_CLIMA.notaDoJev}`)
+      // `limiar` é o corte que valeu NAQUELA mensagem (o do agente da
+      // conversa, #2216): a concordância corta por ele, com o padrão como
+      // fallback para as mensagens anteriores ao #2219.
+      .select(
+        `nota:metadata->${CHAVES_DO_CLIMA.nota}, nota_do_jev:metadata->${CHAVES_DO_CLIMA.notaDoJev}, limiar:metadata->${CHAVES_DO_CLIMA.limiar}`,
+      )
       .eq("organization_id", org.orgId)
       .gte("created_at", diasAtras(DIAS_DA_CONCORDANCIA))
       .eq(`metadata->>${CHAVES_DO_CLIMA.motor}`, "llm" satisfies MotorDoClima)
@@ -217,12 +475,48 @@ export async function GET(): Promise<Response> {
     // disso a conta sai das mais recentes. O agregado em SQL é o passo seguinte.
     db
       .from("messages")
-      .select(`conversa:conversation_id, nota_do_jev:metadata->${CHAVES_DO_CLIMA.notaDoJev}`)
+      .select(
+        `conversa:conversation_id, nota_do_jev:metadata->${CHAVES_DO_CLIMA.notaDoJev}, limiar:metadata->${CHAVES_DO_CLIMA.limiar}`,
+      )
       .eq("organization_id", org.orgId)
       .gte("created_at", diasAtras(DIAS_DOS_NUMEROS))
       .not(`metadata->${CHAVES_DO_CLIMA.notaDoJev}`, "is", null)
       .order("created_at", { ascending: false })
       .limit(PAGINA),
+    lerObservacoes(),
+    lerPercebidos(),
+    db.from("org_guardrail_layers").select("layer, enabled").eq("organization_id", org.orgId),
+    // Com a contagem das intenções: o roteador ativo sem nenhuma (o estado logo
+    // depois de criar um) ou com mais do que cabe nunca é perguntado ao Jev.
+    db
+      .from("ai_routers")
+      .select("id, intencoes:ai_router_members(count)")
+      .eq("organization_id", org.orgId)
+      .eq("is_active", true),
+    lerQuemAtende(),
+    // Os follow-ups publicados, com o grafo da versão ativa: é nele que se vê o
+    // passo "Classificar (IA)" (`algumFluxoQueClassifica`).
+    db
+      .from("followup_flow_pointers")
+      .select("versao:followup_flow_versions!followup_flow_pointers_active_version_id_fkey(graph)")
+      .eq("organization_id", org.orgId)
+      .eq("status", "active"),
+    // E as versões em que alguma inscrição ainda anda: o motor as leva ao passo
+    // mesmo com o follow-up desativado ou republicado sem ele — e cada resposta
+    // vai ao Jev. Sem elas, o cartão diria "Não roda" com dados saindo.
+    // ponytail: o `!inner` procura a inscrição viva por versão, sem índice em
+    // `version_id`; se pesar, um índice parcial nos status vivos.
+    db
+      .from("followup_flow_versions")
+      .select("graph, inscricoes:followup_enrollments!inner(id)")
+      .eq("organization_id", org.orgId)
+      .not("inscricoes.status", "in", INSCRICAO_ENCERRADA)
+      .limit(1, { referencedTable: "inscricoes" }),
+    // A IA de sempre do ROTEADOR é a pergunta do turno (`temIaDeSempre`), não a
+    // do clima: o cartão só oferece o Jev roteando sozinho onde ele teria a
+    // reserva (decisão B, doc 89). Nunca rejeita: na dúvida (até o pool que não
+    // abre, como em `lerQuemAtende`), diz que não tem — e o turno diz o mesmo.
+    (async () => temIaDeSempre(getRequestPool(), llmEdgeConfigFromEnv(env), org.orgId))().catch(() => false),
   ]);
 
   const erro =
@@ -230,7 +524,13 @@ export async function GET(): Promise<Response> {
     credsRes.error?.message ??
     semana.erro ??
     comparadasRes.error?.message ??
-    percebidasRes.error?.message;
+    percebidasRes.error?.message ??
+    observacoes.erro ??
+    percebidos.erro ??
+    camadasRes.error?.message ??
+    roteadoresRes.error?.message ??
+    fluxosRes.error?.message ??
+    versoesEmCursoRes.error?.message;
   if (erro) return fail("query_failed", erro, 500, { requestId });
 
   const credenciais = credsRes.data ?? [];
@@ -243,6 +543,18 @@ export async function GET(): Promise<Response> {
     null;
 
   const { numeros, ultima_falha } = numerosDaSemana(semana.linhas);
+  const config = lerConfigDoJev(orgRes.data?.settings);
+  // O dreno descarta o turno do modo externo antes de tudo (spec 14), e o
+  // worker não pergunta os pedidos ali — o mesmo `aiDispatchModeSchema`.
+  const externo =
+    aiDispatchModeSchema.parse((orgRes.data?.settings as { ai_dispatch_mode?: unknown } | null | undefined)?.ai_dispatch_mode) ===
+    "external";
+  const semAtendente: SemAtendente | null = externo ? "externo" : haQuemAtenda === false ? "ninguem_no_ar" : null;
+  const linhasDoClima = comparadasRes.data ?? [];
+  const doClima: Concordancia = {
+    ...concordancia(linhasDoClima),
+    ...(linhasDoClima.length >= MENSAGENS_COMPARADAS_MAX ? { teto_da_amostra: MENSAGENS_COMPARADAS_MAX } : {}),
+  };
 
   return ok(
     {
@@ -259,13 +571,26 @@ export async function GET(): Promise<Response> {
         rotulo: mostrada?.label ?? null,
         erro_de_validacao: mostrada?.validation_error ?? null,
       },
-      config: configPublica(lerConfigDoJev(orgRes.data?.settings)),
+      config: configPublica(config),
       tarefas: TAREFAS,
+      por_tarefa: porTarefa(
+        config,
+        { ...observacoes.porTarefa, [TAREFA_DO_CLIMA.id]: doClima },
+        percebidos.porTarefa,
+        camadasEfetivas(camadasRes.data ?? []),
+        algumRoteadorQuePergunta(roteadoresRes.data ?? []),
+        semAtendente,
+        algumFluxoQueClassifica([
+          ...(fluxosRes.data ?? []),
+          ...(versoesEmCursoRes.data ?? []).map((versao) => ({ versao })),
+        ]),
+      ),
       tem_ia_de_sempre: iaDeSempre !== null,
+      roteador_tem_ia_de_sempre: roteadorTemIaDeSempre,
       numeros: {
         ...numeros,
         irritados: irritadosPercebidos(percebidasRes.data ?? []),
-        observacao: concordancia(comparadasRes.data ?? []),
+        observacao: doClima,
       },
       ultima_falha,
       pode_editar: roleAtLeast(org.role, "admin"),
@@ -279,13 +604,23 @@ export async function GET(): Promise<Response> {
 const corpoDoPatch = z
   .object({
     ligado: z.boolean().optional(),
+    /** O estado do clima, no nome da onda 1 — a imagem anterior também o entende. */
     modo: z.enum(["observacao", "decide"]).optional(),
+    modo_roteador: z.enum(["comparacao", "sob_demanda"]).optional(),
     /** A caixa marcada na tela. Só pesa ao ligar pela primeira vez. */
     aceite_lgpd: z.literal(true).optional(),
+    tarefa: idDaTarefaSchema.optional(),
+    estado: z.enum(ESTADOS_DA_TAREFA).optional(),
   })
   .strict()
-  .refine((c) => c.ligado !== undefined || c.modo !== undefined, {
-    message: "informe `ligado` ou `modo`",
+  .refine((c) => (c.tarefa === undefined) === (c.estado === undefined), {
+    message: "`tarefa` e `estado` vão juntos",
+  })
+  .refine((c) => c.modo === undefined || c.tarefa === undefined, {
+    message: "informe `modo` ou `tarefa`, não os dois",
+  })
+  .refine((c) => c.ligado !== undefined || c.modo !== undefined || c.modo_roteador !== undefined || c.tarefa !== undefined, {
+    message: "informe `ligado`, `modo`, `modo_roteador` ou `tarefa`",
   });
 
 export async function PATCH(req: NextRequest): Promise<Response> {
@@ -316,8 +651,32 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   if (orgErr) return fail("query_failed", orgErr.message, 500, { requestId });
   const atual = lerConfigDoJev(orgAtual?.settings);
 
-  const mudanca: Partial<Pick<ConfigDoJev, "ligado" | "modo" | "aceite">> = {};
-  if (corpo.modo !== undefined && corpo.modo !== atual.modo) mudanca.modo = corpo.modo;
+  const mudanca: MudancaDaConfig = {};
+  if (corpo.modo_roteador !== undefined && corpo.modo_roteador !== atual.modo_roteador) {
+    // Decisão B (doc 89): sem a IA de sempre, o Jev não roteia sozinho. O turno
+    // confere de novo a cada mensagem; aqui a recusa é para a tela não gravar um
+    // modo que não valeria.
+    if (corpo.modo_roteador === "sob_demanda" &&
+      !(await temIaDeSempre(getRequestPool(), llmEdgeConfigFromEnv(env), org.orgId))) {
+      return fail("jev_sem_ia_de_sempre", t(ROTEADOR_SOB_DEMANDA_SEM_IA), 422, { requestId });
+    }
+    mudanca.modo_roteador = corpo.modo_roteador;
+  }
+  // `modo` é o clima com o nome antigo: os dois pedidos chegam ao mesmo lugar.
+  const pedido =
+    corpo.tarefa !== undefined && corpo.estado !== undefined
+      ? { tarefa: corpo.tarefa, estado: corpo.estado }
+      : corpo.modo !== undefined
+        ? { tarefa: TAREFA_DO_CLIMA.id, estado: ESTADO_DO_MODO[corpo.modo] }
+        : null;
+  // A tarefa que só observa não tem o que decidir: aceitar o pedido gravaria um
+  // estado que o worker não obedece e que o cartão mostraria como "Só observa".
+  const soObserva = pedido ? TAREFAS_DO_JEV.find((x) => x.id === pedido.tarefa)?.soObserva : undefined;
+  if (pedido?.estado === "decidindo" && soObserva !== undefined) {
+    return fail("jev_tarefa_so_observa", t(soObserva), 422, { requestId });
+  }
+  const estadoAnterior = pedido ? estadoGravadoDaTarefa(atual, pedido.tarefa) : undefined;
+  if (pedido && pedido.estado !== estadoAnterior) mudanca.tarefas = { [pedido.tarefa]: pedido.estado };
   if (corpo.ligado === false && atual.ligado) mudanca.ligado = false;
   if (corpo.ligado === true && !atual.ligado) {
     const { data: creds, error: credsErr } = await admin
@@ -346,7 +705,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
           { requestId },
         );
       }
-      mudanca.aceite = { em: new Date().toISOString(), por: user.id };
+      // O texto aceito é o de "cada mensagem, sozinha": o alcance fica gravado
+      // para a tarefa que pedir mais nunca valer com ele (`./tarefas`).
+      mudanca.aceite = { em: new Date().toISOString(), por: user.id, alcance: "mensagem" };
     }
     mudanca.ligado = true;
   }
@@ -370,7 +731,11 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         ? "ai.jev.ligado"
         : mudanca.ligado === false
           ? "ai.jev.desligado"
-          : "ai.jev.modo_alterado",
+          : corpo.modo !== undefined
+            ? "ai.jev.modo_alterado"
+            : mudanca.modo_roteador !== undefined
+              ? "ai.jev.modo_roteador_alterado"
+              : "ai.jev.tarefa_alterada",
     organizationId: org.orgId,
     actorUserId: user.id,
     resourceType: "organization",
@@ -378,7 +743,14 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     requestId,
     metadata: {
       modo: gravado.config.modo,
-      ...(mudanca.modo !== undefined ? { modo_anterior: atual.modo } : {}),
+      ...(mudanca.modo_roteador !== undefined ? {
+        modo_roteador: mudanca.modo_roteador,
+        modo_roteador_anterior: atual.modo_roteador,
+      } : {}),
+      ...(gravado.config.modo !== atual.modo ? { modo_anterior: atual.modo } : {}),
+      ...(mudanca.tarefas !== undefined && pedido
+        ? { tarefa: pedido.tarefa, estado: pedido.estado, estado_anterior: estadoAnterior ?? null }
+        : {}),
       aceite_registrado: mudanca.aceite !== undefined,
     },
   });

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { PRIORIDADES_DA_TAREFA } from '@/lib/tarefas/tipos';
+
 /**
  * Flow graph schema for the follow-up automation system.
  * Defines types and Zod validators for nodes, edges, and complete graphs.
@@ -15,6 +17,17 @@ export const NODE_TYPES = [
   'collect',
   'skill',
   'action',
+  // Lembrete interno (#1540): grava `crm_tasks` e NÃO envia mensagem. É a caixa
+  // que advocacia, saúde e serviços regulados precisam — o sistema lembra a
+  // equipe, a mensagem sai de uma pessoa.
+  'internal_task',
+  // #2065: dois tipos de ACAO que não falam com o cliente — o fluxo deixa de
+  // só mandar mensagem. `move_lead` move o card para outra etapa (o mesmo
+  // escritor de etapa do board/automação), `edit_lead_tag` grava tag no lead
+  // (a MESMA `add_tag` do motor de automação). "Disparar campanha" ficou de
+  // fora desta fatia e é o passo seguinte da issue.
+  'move_lead',
+  'edit_lead_tag',
   'end',
 ] as const;
 export type NodeType = (typeof NODE_TYPES)[number];
@@ -245,6 +258,61 @@ export const actionConfigSchema = z.discriminatedUnion('mode', [
     template_id: z.string().uuid(),
   }),
 ]);
+
+/**
+ * Internal task node configuration (#1540) — os MESMOS campos da ação de
+ * automação `create_task`, de propósito: as duas portas criam a mesma tarefa,
+ * e campos diferentes virariam duas telas ensinando duas verdades.
+ *
+ * `atribuir_a` é nominal (`dono_do_lead`) porque o fluxo é publicado sem saber
+ * quem vai atender amanhã — o dono muda, o fluxo não.
+ */
+export const internalTaskConfigSchema = z.strictObject({
+  /** Título com `{{lead.title}}` e `{{contact.name}}`. */
+  titulo: z.string().min(1).max(200),
+  /** De quantos dias o prazo cai a partir do disparo. */
+  vence_em_dias: z.number().int().min(0).max(365),
+  atribuir_a: z.union([
+    z.literal('dono_do_lead'),
+    z.strictObject({ usuario_id: z.string().uuid() }),
+  ]),
+  prioridade: z.enum(PRIORIDADES_DA_TAREFA),
+});
+
+/**
+ * Nó `move_lead` (#2065) — mover o card para outra etapa do MESMO funil.
+ *
+ * Só a etapa, sem `pipeline_id`: quem escolhe o destino é o SELETOR de etapas
+ * da tela, e quem RECUSA troca de funil é a casa — `moveLeadHandler`
+ * (`app/api/v1/leads/_handler`) devolve `pipeline_immutable_use_clone` quando a
+ * etapa não é do funil do lead, a mesma régua do board, das automações e da
+ * tool MCP. Repetir aqui a pergunta de funil seria uma segunda régua para a
+ * mesma regra.
+ *
+ * `stage_id` aceita vazio porque o rascunho é validado SÓ estruturalmente
+ * (`flowGraphSchema`) e o nó nasce sem destino — quem exige etapa escolhida é o
+ * `validate-publish` (`etapa_destino_ausente`), como a condição com regra em
+ * branco.
+ */
+export const moveLeadConfigSchema = z.strictObject({
+  stage_id: z.string().max(64),
+});
+
+/**
+ * Nó `edit_lead_tag` (#2065) — grava tag no lead, o merge idempotente da ação
+ * `add_tag` do motor de automação (`lib/automation/actions/add-tag.ts`), com os
+ * MESMOS limites do schema de webhook (`lib/schemas/webhooks.ts`): até 10 tags
+ * de até 60 caracteres.
+ *
+ * Lista vazia é rascunho em construção (mesma degradação do `stage_id`); o
+ * publish recusa (`tag_ausente`) — um nó que não grava nada não pode ser
+ * publicado como se gravasse.
+ */
+export const editLeadTagConfigSchema = z.strictObject({
+  tags: z
+    .array(z.string().max(60, "Tag muito longa: máximo de 60 caracteres."))
+    .max(10, "No máximo 10 tags por caixa."),
+});
 
 /**
  * One rule of a `condition` node. In `branching: 'per_check'` it IS a branch,
@@ -480,6 +548,39 @@ export const flowNodeSchema = z.discriminatedUnion('type', [
     }),
     config: actionConfigSchema,
   }),
+  // Internal task node (#1540): creates a CRM task, never sends a message
+  z.strictObject({
+    id: z.string().min(1),
+    type: z.literal('internal_task'),
+    label: z.string().min(1).max(60),
+    position: z.strictObject({
+      x: z.number(),
+      y: z.number(),
+    }),
+    config: internalTaskConfigSchema,
+  }),
+  // Nó de ação (#2065): move o card para outra etapa do funil
+  z.strictObject({
+    id: z.string().min(1),
+    type: z.literal('move_lead'),
+    label: z.string().min(1).max(60),
+    position: z.strictObject({
+      x: z.number(),
+      y: z.number(),
+    }),
+    config: moveLeadConfigSchema,
+  }),
+  // Nó de ação (#2065): grava tag no lead, sem mensagem
+  z.strictObject({
+    id: z.string().min(1),
+    type: z.literal('edit_lead_tag'),
+    label: z.string().min(1).max(60),
+    position: z.strictObject({
+      x: z.number(),
+      y: z.number(),
+    }),
+    config: editLeadTagConfigSchema,
+  }),
   // End node: terminal state
   z.strictObject({
     id: z.string().min(1),
@@ -554,6 +655,20 @@ export const flowSettingsSchema = z.strictObject({
    * roteiro abandonado voltava a perguntar semanas depois (prova do #1130).
    */
   expira_em_horas: z.number().int().min(1).max(720).optional(),
+  /**
+   * O roteiro pode começar de novo para um cliente que JÁ o concluiu (#1130,
+   * decisão do doc 69: cada roteiro escolhe). Ausente = NÃO recomeça: repetir a
+   * palavra-gatilho de um cadastro já feito reabria as mesmas perguntas.
+   * Agendamento, que precisa repetir, liga.
+   */
+  pode_recomecar: z.boolean().optional(),
+  /**
+   * SOMENTE INTERNO (#1540): o fluxo inteiro não fala com o cliente. A
+   * publicação (`validate-publish.ts`) recusa qualquer nó de ENVIO num fluxo
+   * com esta marca — é a garantia de que "só lembrete" não é uma intenção que
+   * alguém esquece de conferir antes de publicar.
+   */
+  somente_interno: z.boolean().optional(),
 });
 export type FlowSettings = z.infer<typeof flowSettingsSchema>;
 

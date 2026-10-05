@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { createClient } from "@supabase/supabase-js";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./helpers/test";
 
 import { credenciaisSupabaseDeTeste } from "../../scripts/lib/env-de-teste";
 
@@ -36,7 +36,7 @@ interface E2ECreds {
 
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
 const creds = JSON.parse(fs.readFileSync(CREDS_PATH, "utf8")) as E2ECreds;
-const EVIDENCE = path.join(process.cwd(), ".superpowers/evidence");
+const EVIDENCE = path.join(process.cwd(), "evidence");
 
 /**
  * Login simples — e por isso o usuário é o `agent`, nunca o `admin`.

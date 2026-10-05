@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { EntradaDaAgenda } from "@/components/agenda/EntradaDaAgenda";
 import { EnderecoDaMarcacao } from "@/components/agenda/EnderecoDaMarcacao";
@@ -23,6 +23,7 @@ import { EmptyAgenda } from "@/components/empty";
 import { rotuloDoLocal } from "@/lib/agenda/locais";
 import { ancoraAoFecharPainel } from "@/lib/agenda/ancora-depois-de-marcar";
 import { ancoraLocalDoDia } from "@/lib/agenda/semana-semente";
+import { dataDeParede, diaLocalISO, partesNoFuso } from "@/lib/agenda/fuso";
 import { janelaDoMesVisivel } from "@/lib/agenda/janela-do-mes-visivel";
 import { recorteDaGrade as recorteDaGradeDe } from "@/lib/agenda/recorte-da-grade";
 import { resolverResponsavelDoPainel } from "@/lib/agenda/responsavel-do-painel";
@@ -74,6 +75,7 @@ const VISOES: Array<{ id: VisaoDaAgenda; rotulo: string }> = [
  * imports sem querer.
  */
 export function AgendaClient({
+  fusoDaAgenda,
   fusoDeApresentacao,
   hojeNaOrganizacao,
   usuarioId,
@@ -86,6 +88,12 @@ export function AgendaClient({
   agendamentosIniciais,
   podeMarcar,
 }: {
+  /**
+   * O fuso RESOLVIDO da organização (`fusoUtilizavel(activeOrg.timezone)`,
+   * calculado em `page.tsx`). É a régua da grade: sem ele a agenda desenha
+   * hora de parede no relógio do navegador (issue #1362).
+   */
+  fusoDaAgenda: string;
   fusoDeApresentacao: string | null;
   /**
    * A data de HOJE no fuso da ORGANIZAÇÃO, resolvida pelo servidor
@@ -201,8 +209,48 @@ export function AgendaClient({
   // "Atendimento", "Consulta", "Reunião", só "Atendimento" era alcançável pela
   // tela. As categorias existiam no banco, no seed e na API — e a tela oferecia
   // uma. Achado escrevendo a spec de marcar, não lendo o código.
-  const [tipoId, setTipoId] = React.useState<string | null>(() => tiposIniciais[0]?.id ?? null);
+  // ⚠️ E O TIPO ESCOLHIDO ERA SÓ ESTADO DO REACT — o outro lado do mesmo achado.
+  // A escolha na grade ia para um `useState` sem URL, sem armazenamento e sem
+  // leitor de query nenhuma: no F5 ela morria e a grade voltava ao primeiro tipo
+  // em ordem alfabética (#1657). Quem estava olhando "Avaliação" recarregava e
+  // via "Atendimento" — e, sem jornada publicada para o primeiro, a tela inteira
+  // dizia "a jornada de atendimento ainda não foi publicada". Evidência na
+  // issue: as runs 36061761510 e 36164033754, que acharam o defeito pelo aviso
+  // nascendo entre duas leituras de bounding box no e2e do arraste (#1656).
+  //
+  // O tipo passa a viver na URL (`?tipo=`), no mesmo formato do `?id=` da Inbox
+  // (#1629). LER no inicializador, e não num efeito: o servidor pinta a página
+  // com a MESMA query que o cliente lê, então primeira pintura e recarregamento
+  // concordam — sem um piscar voltando ao primeiro tipo. `?tipo=` de um tipo já
+  // desativado cai no `?? tiposIniciais[0]` da linha seguinte, que é o
+  // comportamento de sempre para quem não escolheu nada.
+  const busca = useSearchParams();
+  const caminho = usePathname();
+  const [tipoId, setTipoId] = React.useState<string | null>(
+    () => busca.get("tipo") ?? tiposIniciais[0]?.id ?? null,
+  );
   const tipo = tiposIniciais.find((t) => t.id === tipoId) ?? tiposIniciais[0] ?? null;
+  /**
+   * ESCOLHER O TIPO GRAVA NA URL — a outra metade do `useState` acima.
+   *
+   * `window.history.replaceState` e não `router.replace`, pela razão medida na
+   * Inbox (#1629): a History API troca a query SEM pedir um novo Server
+   * Component a cada clique — e esta rota tem cinco consultas de servidor atrás
+   * dela (`page.tsx`), que rodariam a cada troca de tipo. `replace` e não
+   * `push`: trocar de tipo não é uma navegação nova, e com `push` o "voltar"
+   * do navegador acumularia um passo por clique.
+   */
+  const escolherTipo = React.useCallback(
+    (id: string) => {
+      setTipoId(id);
+      const parametros = new URLSearchParams(busca.toString());
+      if (id) parametros.set("tipo", id);
+      else parametros.delete("tipo");
+      const query = parametros.toString();
+      window.history.replaceState(null, "", query ? `${caminho}?${query}` : caminho);
+    },
+    [busca, caminho],
+  );
   const endereco = enderecoEditado ?? tipo?.localDetalhes ?? "";
   const [visao, setVisao] = React.useState<VisaoDaAgenda>("semana");
   /**
@@ -307,11 +355,20 @@ export function AgendaClient({
     const mapa: Record<string, Array<{ instante: string; rotulo: string }>> = {};
     for (const s of horarios?.slots ?? []) {
       const d = new Date(s.inicio);
-      const chave = format(d, "yyyy-MM-dd");
-      (mapa[chave] ??= []).push({ instante: s.inicio, rotulo: format(d, "HH:mm") });
+      // A CHAVE E O RÓTULO SAEM DO FUSO DA ORGANIZAÇÃO: o slot das 09:00 da
+      // clínica é daquele dia e daquela hora PARA ELA, não para quem está
+      // olhando (issue #1362). O lookup em `PainelDeMarcacao` continua batendo,
+      // porque ele indexa pela data de calendário da mesma âncora.
+      const chave = diaLocalISO(d, fusoDaAgenda);
+      const p = partesNoFuso(d, fusoDaAgenda);
+      const dois = (n: number) => String(n).padStart(2, "0");
+      (mapa[chave] ??= []).push({
+        instante: s.inicio,
+        rotulo: `${dois(p.hora)}:${dois(p.minuto)}`,
+      });
     }
     return mapa;
-  }, [horarios]);
+  }, [horarios, fusoDaAgenda]);
 
   // OS AGENDAMENTOS SÃO REAIS, e agora TAMBÉM se atualizam sem recarregar.
   //
@@ -684,7 +741,7 @@ export function AgendaClient({
                       data-testid={`tipo-${opcao.id}`}
                       aria-pressed={opcao.id === tipo?.id}
                       onClick={() => {
-                        setTipoId(opcao.id);
+                        escolherTipo(opcao.id);
                         // Tipo novo, local novo — senão a Sala 2 do tipo anterior
                         // viaja para um atendimento online que não tem sala.
                         setEnderecoEditado(null);
@@ -815,6 +872,10 @@ export function AgendaClient({
                 fontesDefasadas={horarios?.fontes_defasadas}
                 googleCoberturaParcial={horarios?.google_cobertura_parcial}
                 onMesVisivel={onMesVisivel}
+                // `data` do React Query é da chave ATUAL (sem `placeholderData`),
+                // então chegou = é do `mesDoPainel`. É o que deixa o painel saber
+                // "este mês acabou" em vez de "ainda carregando".
+                mesCarregado={horarios ? mesDoPainel : null}
                 horarioInicial={horarioEscolhido ?? undefined}
                 // O ENCAIXE é desta tela, e só dela: aqui quem marca é uma
                 // pessoa da equipe com sessão, que é exatamente o ator a quem a
@@ -929,7 +990,11 @@ export function AgendaClient({
                 const alvo = todos.find((a) => a.id === cancelandoId);
                 if (!alvo) return t("Este agendamento não está mais na lista.");
                 const quem = alvo.quemSeraAtendido ? ` ${t("de")} ${alvo.quemSeraAtendido}` : "";
-                return `${alvo.titulo}${quem}, ${format(new Date(alvo.comeca), t("d 'de' MMMM 'às' HH:mm"), { locale: localeDaData })}.`;
+                return `${alvo.titulo}${quem}, ${format(
+                  dataDeParede(new Date(alvo.comeca), fusoDaAgenda),
+                  t("d 'de' MMMM 'às' HH:mm"),
+                  { locale: localeDaData },
+                )}.`;
               })()}
             </p>
             <label
@@ -1012,6 +1077,9 @@ export function AgendaClient({
         agendamentos={agendamentosAcionaveis}
         pessoas={pessoas}
         agora={new Date()}
+        // Mesma régua da grade ao lado: sem isto a lista imprime o relógio do
+        // navegador e a MESMA tela diz duas horas para o mesmo compromisso.
+        fuso={fusoDaAgenda}
         className="max-h-[320px]"
         // ⚠️ ESTAS DUAS PROPS FALTAVAM, e a ausência tinha cara de permissão.
         // `HistoricoDaAgenda` usa `disabled={!onRemarcar}`; sem elas os botões
@@ -1085,6 +1153,7 @@ export function AgendaClient({
           proposta de remarcação, o otimismo com volta atrás) mora em
           `AgendaInterativa`; aqui fica só o que esta tela já sabia. */}
       <AgendaInterativa
+        fuso={fusoDaAgenda}
         visao={visao}
         ancora={ancora}
         agora={new Date()}
@@ -1093,14 +1162,20 @@ export function AgendaClient({
         recorte={recorteDaGrade}
         tipos={tiposIniciais.map((t) => ({ id: t.id, nome: t.nome, duracaoMin: t.duracaoMin }))}
         tipo={tipo ? { id: tipo.id, duracaoMin: tipo.duracaoMin } : null}
-        onEscolherTipo={setTipoId}
+        onEscolherTipo={escolherTipo}
         // SEGUNDA PORTA: o clique num bloco livre da grade. Sem `onMarcarEm`, a
         // `AgendaInterativa` não monta a interação, e a grade volta a ser o que
         // ela é para quem só lê — uma leitura, sem bloco clicável.
         onMarcarEm={
           podeMarcar
             ? (instante) => {
-                setHorarioEscolhido({ instante, rotulo: format(new Date(instante), "HH:mm") });
+                setHorarioEscolhido({
+                  instante,
+                  // HH:mm no MESMO fuso em que a grade desenhou o clique: sem
+                  // isto o resumo guardava a hora do NAVEGADOR e não batia com
+                  // a célula que a pessoa acabou de escolher.
+                  rotulo: format(dataDeParede(new Date(instante), fusoDaAgenda), "HH:mm"),
+                });
                 setRemarcandoId(null);
                 // `abrirMarcacao` e não `setMarcando(true)`: clicar num bloco
                 // livre abre uma marcação NOVA, e ela nasce com o vínculo da rota.
@@ -1113,8 +1188,16 @@ export function AgendaClient({
            o detalhe só abria por `?compromisso=`, que apenas o Histórico e o Radar
            linkavam. Reusa o MESMO parâmetro que `EntradaDaAgenda` já lê — e `push`,
            não `replace`, porque é o que o Histórico faz com `<Link>` e é o que faz
-           o botão voltar do celular fechar o detalhe. */
-        onAbrirAgendamento={(id) => router.push(`/app/agenda?compromisso=${id}`)}
+           o botão voltar do celular fechar o detalhe. E o `?tipo=` vai JUNTO:
+           sem ele, abrir um card trocava a URL por só `?compromisso=`, o fecho
+           não achava tipo nenhum para manter e o F5 seguinte voltava ao
+           primeiro (#1657). */
+        onAbrirAgendamento={(id) => {
+          const parametros = new URLSearchParams();
+          if (tipo) parametros.set("tipo", tipo.id);
+          parametros.set("compromisso", id);
+          router.push(`/app/agenda?${parametros.toString()}`);
+        }}
         className="min-h-0 flex-1"
       />
     </div>

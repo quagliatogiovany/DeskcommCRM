@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { updateBranding } from "@/app/actions/settings/updateBranding";
 import { CampoDeLogo } from "@/components/branding/CampoDeLogo";
+import { CampoDoIconeDaAba } from "@/components/branding/CampoDoIconeDaAba";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ import { EstadoDaMarca } from "./_estado";
 import { avisosDaMarca, type DistanciaAteSuaCor } from "@/lib/branding/linguagem";
 import { TiraDeTons, type ItemDaLegenda } from "@/components/branding/TiraDeTons";
 import { useT } from "@/hooks/i18n/useT";
+import { MENSAGEM_DA_RECUSA_DE_ESCRITA } from "@/lib/auth/recusa-de-escrita-de-admin";
 
 export interface MarcaGravada {
   readonly app_name: string | null;
@@ -47,6 +49,8 @@ interface Props {
    */
   readonly logoEmVigor: string | null;
   readonly logoEscuroEmVigor?: string | null;
+  /** O ícone da aba subido nesta tela (URL pública), ou `null` para o desenhado. */
+  readonly iconeDaAba?: string | null;
   /** O que apareceria SEM o arquivo subido — a URL colada no `.env`, se houver. */
   readonly logoDoAmbiente: string | null;
   readonly origens: { readonly nome: string; readonly logoUrl: string; readonly cor: string };
@@ -57,6 +61,7 @@ interface Props {
 
 /** Mensagem por código de recusa da server action. */
 const ERRO_EM_PORTUGUES: Record<string, string> = {
+  ...MENSAGEM_DA_RECUSA_DE_ESCRITA,
   validation_failed: "Algum campo não está no formato esperado.",
   unauthenticated: "Sua sessão expirou. Entre de novo para salvar.",
   forbidden_role: "Só quem administra a instalação pode mudar a marca.",
@@ -70,6 +75,7 @@ export function FormularioDaMarca({
   nomeEmVigor,
   logoEmVigor,
   logoEscuroEmVigor,
+  iconeDaAba,
   logoDoAmbiente,
   origens,
   definidoNestaTela,
@@ -246,17 +252,14 @@ export function FormularioDaMarca({
 
           Medido AGORA, sobre os call sites de `branding()`: nenhum é client
           component (há catraca em
-          `tests/unit/marca-sem-divergencia-de-hidratacao.test.tsx`); os que
-          sobram são server components (login, cadastro, casca e boas-vindas da
-          configuração inicial, mais o texto legal) e leem `process.env` direto.
-          São esses que continuam no arquivo de instalação — e o login segue ali
-          de propósito, porque `tests/e2e/icone-da-marca.spec.ts` cruza o título
-          da aba (banco) contra o texto do login (arquivo) e a spec mediria nada
-          se os dois viessem da mesma fonte.
+          `tests/unit/marca-sem-divergencia-de-hidratacao.test.tsx`). O login
+          agora usa `marcaDaSaida(null)` para acompanhar a marca da instalação;
+          cadastro, configuração inicial e texto legal ainda usam o valor do
+          ambiente.
         */}
         <p className="text-xs text-text-muted">
           {t(
-            "Deixe em branco para voltar ao nome padrão. Este nome já aparece no título da aba do navegador, nos menus laterais, nos e-mails que o sistema envia (para as empresas que não definiram um nome próprio), no aplicativo de verificação em duas etapas e no arquivo de códigos de recuperação que o usuário baixa. Ainda NÃO chega às telas de entrada e cadastro nem às da configuração inicial: essas continuam com o nome gravado no arquivo de instalação do servidor até a próxima atualização da stack.",
+            "Deixe em branco para voltar ao nome padrão. Este nome já aparece no título da aba do navegador, na tela de login, nos menus laterais, nos e-mails que o sistema envia (para as empresas que não definiram um nome próprio), no aplicativo de verificação em duas etapas e no arquivo de códigos de recuperação que o usuário baixa. Ainda NÃO chega às telas de cadastro nem às da configuração inicial: essas continuam com o nome gravado no arquivo de instalação do servidor até a próxima atualização da stack.",
           )}
         </p>
       </Card>
@@ -349,6 +352,9 @@ export function FormularioDaMarca({
           origemDoHerdado="do arquivo de instalação do servidor"
           nomeEmVigor={nomeEmVigor}
         />
+        {/* Mesmo cartão do logo: também sobe na hora, sem passar pelo Salvar.
+            Literal, nunca memoizado — ver o cabeçalho de CampoDoIconeDaAba. */}
+        <CampoDoIconeDaAba iconeDaCamada={{ url: iconeDaAba ?? null }} />
       </Card>
 
       <EstadoDaMarca

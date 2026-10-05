@@ -10,7 +10,7 @@ export interface LeadsPorHorarioResponse {
   por_hora: PorHoraRaw[];
 }
 
-/** migration 0418 — heatmap de dia-da-semana × hora em que o lead chega. */
+/** migration 0560 — heatmap de dia-da-semana × hora em que o lead chega. */
 export function useLeadsPorHorario() {
   return useQuery({
     queryKey: ["metrics", "leads-por-horario"],

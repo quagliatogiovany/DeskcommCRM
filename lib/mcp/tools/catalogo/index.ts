@@ -14,6 +14,7 @@
  * Client-safe: zero import de zod, supabase ou next/headers.
  */
 import type { ModuloOpcional } from "@/lib/instalacao/modulos";
+import type { CapacidadeDaOrganizacao } from "@/lib/organizacao/capacidades";
 import { TOOLS_AGENDAMENTO } from "./agendamento";
 import { TOOLS_ATENDIMENTO } from "./atendimento";
 import { TOOLS_COMERCIO } from "./comercio";
@@ -23,6 +24,7 @@ import { TOOLS_ESCALACAO } from "./escalacao";
 import { TOOLS_FUNIL } from "./funil";
 import { TOOLS_GOVERNANCA } from "./governanca";
 import { TOOLS_NODUS } from "./nodus";
+import { TOOLS_HONORARIOS } from "./honorarios";
 import { TOOLS_OPERACAO } from "./operacao";
 import { TOOLS_RETENCAO } from "./retencao";
 import type { McpToolCatalogEntry } from "./tipos";
@@ -40,6 +42,7 @@ export const TOOL_CATALOG: ReadonlyArray<McpToolCatalogEntry> = [
   ...TOOLS_COMERCIO,
   ...TOOLS_DADOS_EXTERNOS,
   ...TOOLS_NODUS,
+  ...TOOLS_HONORARIOS,
   ...TOOLS_OPERACAO,
   ...TOOLS_RETENCAO,
 ];
@@ -78,4 +81,17 @@ export function catalogEntry(name: string): McpToolCatalogEntry | undefined {
 export function deModuloDesligado(name: string, ligados: readonly ModuloOpcional[]): boolean {
   const modulo = catalogEntry(name)?.modulo;
   return modulo !== undefined && !ligados.includes(modulo);
+}
+
+/**
+ * A capacidade e de algo que a ORGANIZACAO desligou? Entao, para ela, a
+ * ferramenta nao existe. `ligadas` vem de `capacidadesDaOrganizacao()`. Os
+ * mesmos tres lugares de `deModuloDesligado` passam por aqui.
+ */
+export function deCapacidadeDesligada(
+  name: string,
+  ligadas: readonly CapacidadeDaOrganizacao[],
+): boolean {
+  const capacidade = catalogEntry(name)?.capacidade;
+  return capacidade !== undefined && !ligadas.includes(capacidade);
 }

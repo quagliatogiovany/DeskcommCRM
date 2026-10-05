@@ -11,7 +11,7 @@ name: e2e
 #
 # A execução é dividida em DUAS invocações do playwright de propósito: o
 # limitador de login do produto é por IP (60/300s) e no CI todos os specs vêm do
-# mesmo 127.0.0.1. Ver o comentário do passo "E2E — parte 1 de 4".
+# mesmo 127.0.0.1. Ver o comentário do passo "E2E — parte N de M".
 #
 # É CHECK OBRIGATÓRIO. A régua, para reconferir em vez de acreditar nesta linha:
 #   $ gh api repos/melgarafael/DeskcommCRM/branches/main/protection \
@@ -184,7 +184,7 @@ jobs:
       # uma rodada por parte.
       fail-fast: false
       matrix:
-        parte: [1, 2, 3, 4, 5]
+        parte: [1, 2, 3, 4, 5, 6]
     # ─────────────────────────────────────────────────────────────────────────
     # A COBERTURA DEIXA DE SER PROSA DIGITADA À MÃO.
     #
@@ -618,6 +618,7 @@ jobs:
       # pela própria spec, em loopback, com SQLite e PID exclusivos.
       EXTENSIONS_LOCAL_CATALOG_ORIGIN: "http://127.0.0.1:56331"
       SPECS_PARTE_1: >-
+        conversoes-reprocessamento.spec.ts
         pre-go-live-whatsapp.spec.ts
         smoke.spec.ts auth.spec.ts error-pages.spec.ts
         icone-da-marca.spec.ts
@@ -643,7 +644,6 @@ jobs:
         lote-no-quadro-do-funil.spec.ts
         motivos-de-perda-do-funil.spec.ts
         importar-leads-planilha.spec.ts
-        prova-painel-provedores.spec.ts
         relatorio-de-atividades.spec.ts
         canal-mudo-avisa-na-central.spec.ts
         qa-l12-troca-de-funil.spec.ts
@@ -719,12 +719,12 @@ jobs:
       # Se um dia uma spec de follow-up entrar na PARTE_1 com nome depois de
       # `relogio-`, é aqui que se olha: ou ela vai para a PARTE_2, ou esta vai.
       SPECS_PARTE_2: >-
-        protecao-de-envio-nao-congela-o-padrao.spec.ts
         agente-marca-consulta.spec.ts
         agenda-marcar-pela-tela.spec.ts
         agenda-remarcar-e-cancelar.spec.ts
         agenda-tipos-de-agendamento.spec.ts
         cliente-pela-agenda.spec.ts
+        agenda-dia-desenhado-na-virada-do-mes.spec.ts
         agenda-grade-interativa.spec.ts
         agenda-papel-de-leitura.spec.ts
         agenda-busca-cliente-pelo-nome-do-perfil.spec.ts
@@ -736,6 +736,7 @@ jobs:
         escopo-de-funil-do-agente.spec.ts
         followup-tempo-adaptativo.spec.ts
         gatilho-de-etapa.spec.ts
+        etapa-avisa-na-central.spec.ts
         gatilho-de-caso.spec.ts
         conversa-do-caso.spec.ts
         aviso-de-caso-no-whatsapp.spec.ts
@@ -752,11 +753,9 @@ jobs:
         agenda-caminho-ate-os-horarios.spec.ts
         agenda-google-volta-do-consentimento.spec.ts
         agenda-google-volta-nao-desloga.spec.ts
-        redes-sociais-volta-nao-desloga.spec.ts
         navegacao.spec.ts
         menu-por-empresa-e-a-porta-de-volta.spec.ts
-        agenda-google-meet.spec.ts
-        painel-de-configuracao-da-instalacao.spec.ts
+        icone-da-aba.spec.ts
       # `moeda-da-organizacao` entrou na PARTE_2 em 2026-09-04, ao lado de
       # `navegacao` — mesmo domínio (Configurações) e a mesma ausência de
       # dependência: sem WAHA, Resend, Nuvemshop ou Redis. Toca a organização
@@ -948,7 +947,6 @@ jobs:
         roteamento-por-canal.spec.ts
         whatsapp-pareamento-por-codigo.spec.ts
         central-avisos-destino.spec.ts
-        agenda-presenca-recuperacao.spec.ts
         agenda-google-sync.spec.ts
         encerramento-atendimento.spec.ts
         passagem-com-contexto.spec.ts
@@ -966,10 +964,12 @@ jobs:
         troca-de-organizacao-tem-volta.spec.ts
         organizacoes-criacao-convite-e-cache.spec.ts
         inbox-abas-espelham-o-comando.spec.ts
+        busca-na-conversa.spec.ts
         moeda-da-organizacao.spec.ts
         zona-de-perigo-apaga-dados-de-teste.spec.ts
         email-da-instalacao-pela-tela.spec.ts
         central-avisos-resolver-em-lote.spec.ts
+        central-por-gravidade.spec.ts
         voz-desligada-por-padrao.spec.ts
         voz-primeiro-pareamento.spec.ts
         qa-titulos-das-telas.spec.ts
@@ -985,6 +985,8 @@ jobs:
         presenca-do-atendente.spec.ts
         trunk-sip-config.spec.ts
         fotos-no-catalogo.spec.ts
+        catalogo-busca-no-catalogo-inteiro.spec.ts
+        relatorio-por-etiqueta.spec.ts
 
       # ─── PARTE 4 — a spec de VPS fresca, e quem pode entrar ao lado dela ───
       #
@@ -1066,14 +1068,62 @@ jobs:
       # `JEV_API_BASE_URL` que o `.env.e2e` grava), semeia a entrada de mensagens
       # com o seed da `conversa-vira-lead` e apaga a chave e o `settings.jev` que
       # criou, antes e depois. PREVISÃO, não medida: ~1,5 min de Playwright.
+      #
+      # `jev-roteador` entrou junto dela em 2026-09-25 (onda 2 do Jev, bloco
+      # 2.2), pelo mesmo motivo e com o mesmo isolamento: sobe o próprio dublê
+      # (a mesma porta 3996, com `DUBLE_JEV_RESPOSTAS` forçando a escolha do
+      # Jev), semeia um número, dois agentes e um roteador ativo SÓ dela pelo
+      # service role e apaga tudo no fim. Roda depois da `jev-decisoes-rapidas`
+      # — as duas nunca disputam a porta, porque a parte roda uma spec por vez.
+      # PREVISÃO, não medida: ~1 min.
+      #
+      # `jev-pedidos` entrou junto delas em 2026-09-26 (onda 3 do Jev, bloco
+      # 3.1), pelo mesmo motivo e com o mesmo isolamento: sobe o próprio dublê
+      # (a mesma porta 3996, com `DUBLE_JEV_RESPOSTAS` forçando a resposta das
+      # perguntas dos pedidos), manda as mensagens pela mesma entrada da
+      # `jev-decisoes-rapidas`, publica um agente SÓ dela no número (sem agente
+      # no ar, o Jev não é perguntado) e apaga o agente, a chave, o
+      # `settings.jev` e as observações dos pedidos no fim. Roda depois das
+      # outras duas do Jev: escoa a fila antes de ligar, como a primeira.
+      # O bloco 3.2 acrescentou um quarto cliente e o aviso na Central ("Avisar
+      # a equipe"), que ela também apaga no fim.
+      # PREVISÃO, não medida: ~2 min.
+      #
+      # `jev-followup` entrou junto delas em 2026-09-26 (onda 4.1 do Jev, a
+      # tarefa que lê a resposta ao follow-up e só observa), pelo mesmo motivo e
+      # com o mesmo isolamento: sobe o próprio dublê (a mesma porta 3996, só para
+      # a chave passar no teste), publica dois follow-ups SÓ dela pelas rotas do
+      # construtor (um Classificar de uma saída, o controle, e um de duas) e os
+      # desativa no fim, com a chave e o `settings.jev`. A vizinhança aqui
+      # importa, e é o cuidado que ela exige: a ordem é por CAMINHO, então
+      # `followup-builder`, `-journey`, `-dossie` e `-queue` rodam antes dela, e a
+      # `followup-builder` deixa publicado um Classificar de DUAS saídas — que
+      # tiraria a tarefa do "Não roda" que ela mede primeiro. Por isso ela
+      # desativa, pela rota de desativar, todo follow-up ativo com Classificar de
+      # duas saídas ou mais, e cancela, pela rota de cancelar, toda inscrição viva
+      # numa versão com ele, antes de medir. Nenhuma spec depois dela nesta parte
+      # fala de follow-up (`grep -c followup` em `jev-pedidos`, `jev-roteador`,
+      # `marca-logo`, `olhar-telas-do-epico`, `qa-l12-*` e `suporte-temporario`:
+      # zero em todas, medido em 2026-09-26).
+      # PREVISÃO, não medida: ~1 min.
+      #
+      # `contadores-do-menu` entrou aqui em 2026-09-27 pela folga da parte (a
+      # maior, acima). Semeia o próprio canal, contato, conversa escalada e caso
+      # pelo service role e apaga tudo no fim, então não depende de vizinha.
+      #
+      # `honorarios-instalar-e-pagar` entrou em 2026-09-28 (#1578). Instalar o
+      # módulo é da instalação e não se desfaz: depois dele o menu de Análise
+      # tem uma porta a mais e o pacote Atender, duas capacidades a mais. A
+      # posição na lista NÃO decide a ordem de execução — no job 108983924934
+      # ela rodou em 39º de 77, e a parte inteira passou (77 passed). Medido:
+      # 16,1 s de caso.
       SPECS_PARTE_5: >-
-        inbox-busca-e-filtros-dizem-a-verdade.spec.ts
         extensoes-da-instalacao.spec.ts
         admin-credencial-google.spec.ts
         agenda-primeira-pintura-no-fuso.spec.ts
         agenda-portao-de-hidratacao.spec.ts
-        qa-l12-inbox.spec.ts
-        filtro-por-marcador-pela-tela.spec.ts
+        etapa-pela-conversa.spec.ts
+        pausa-de-reentrada.spec.ts
         funil-arquivado-volta-pela-tela.spec.ts
         followup-builder.spec.ts
         followup-journey.spec.ts
@@ -1088,7 +1138,74 @@ jobs:
         suporte-temporario.spec.ts
         olhar-telas-do-epico.spec.ts
         jev-decisoes-rapidas.spec.ts
+        jev-roteador.spec.ts
+        jev-pedidos.spec.ts
+        jev-followup.spec.ts
         buffer-ssr-caixa-orfa.spec.ts
+        contadores-do-menu.spec.ts
+        honorarios-instalar-e-pagar.spec.ts
+
+      # ─── PARTE 6 — nasceu em 2026-09-28, e o orçamento de 24 min a pediu ───
+      #
+      # Medido no run 36484908881 (main, 7960476d0, todas as partes verdes),
+      # relógio do JOB contra o `ORCAMENTO_SEGUNDOS` de 1440s e o teto de 1800s:
+      #
+      #     parte 1 → 1582s · parte 5 → 1560s · parte 2 → 1454s · parte 3 → 1385s
+      #
+      # Três das quatro comuns já passavam do orçamento com a main VERDE, e o
+      # #1882 foi cortado na parte 5 ("a suíte rodou 1299s ... a parte cresceu")
+      # só por tocar `busca-na-conversa`. Com as quatro comuns nesse nível,
+      # qualquer spec nova estoura alguma — redistribuir já não cabia.
+      #
+      # Playwright por parte, somado dos logs daquele run (instante de término
+      # de cada caso, então entra o tempo dos ganchos), antes → depois:
+      #
+      #     parte 1: 1208s → 920s   (prova-painel-provedores 212, sons-dos-avisos 76)
+      #     parte 2: 1094s → 936s   (agenda-google-meet 57, protecao-de-envio-… 45,
+      #                              recursos-opcionais 35, painel-de-configuracao-… 17,
+      #                              redes-sociais-volta-… 4)
+      #     parte 3: 1020s → 880s   (agenda-presenca-recuperacao 140)
+      #     parte 5: 1183s → 912s   (inbox-busca-e-filtros-… 208, filtro-por-marcador-… 37,
+      #                              qa-l12-inbox 26 — a família que já andou junta)
+      #     parte 6:    —  → 857s
+      #
+      # O piso é aritmético: 4505s de casos comuns ÷ 5 partes = 901s. A parte 2
+      # fica acima dele porque o que sai dela é SÓ o que roda depois de
+      # `navegacao` — o menu que ela mede depende do estado deixado pelas
+      # vizinhas ANTERIORES (bloco de 2026-09-18 acima), e tirar vizinha de
+      # depois não muda esse estado.
+      #
+      # Cada spec movida semeia o próprio dado (service role, pg, dublê em
+      # porta própria) ou só lê os seeds de passo, que rodam em toda parte
+      # `!= 4`. `painel-de-configuracao-da-instalacao` e `recursos-opcionais`
+      # promovem o dono por `afirmarDonoDoServidor` (auto-concessão, não
+      # revoga ninguém).
+      #
+      # PREVISÃO (é previsão; o e2e do PR que criou esta parte mede): jobs
+      # entre ~1240s e ~1320s, isto é, ~2 a 3 min abaixo do orçamento.
+      #
+      # NÃO MEDIDO até aquele run: se as 11 specs passam na vizinhança nova.
+      #
+      # `suspensao-administrativa` entrou em 2026-09-29 (PR 1 da cobrança do
+      # revendedor) na PARTE_6, a de menor previsão (857s). Semeia as próprias
+      # orgs, pessoas, token, fonte de captação e pedido de LGPD pelo service
+      # role e apaga tudo no fim; não depende de seed de passo nem de vizinha.
+      # PREVISÃO, não medida: ~1,5 min de caso.
+      SPECS_PARTE_6: >-
+        agenda-google-meet.spec.ts
+        agenda-presenca-recuperacao.spec.ts
+        filtro-por-marcador-pela-tela.spec.ts
+        fonte-de-captacao-assina-os-envios.spec.ts
+        inbox-busca-e-filtros-dizem-a-verdade.spec.ts
+        mapas-em-provedores.spec.ts
+        painel-de-configuracao-da-instalacao.spec.ts
+        protecao-de-envio-nao-congela-o-padrao.spec.ts
+        prova-painel-provedores.spec.ts
+        qa-l12-inbox.spec.ts
+        recursos-opcionais.spec.ts
+        redes-sociais-volta-nao-desloga.spec.ts
+        sons-dos-avisos.spec.ts
+        suspensao-administrativa.spec.ts
 
       # ─── FORA_DO_CI — as que ficaram fora, e o motivo de cada uma ───
       #
@@ -1108,11 +1225,18 @@ jobs:
       # MEDIDO na API real. O que só esta prova é que o contrato ainda é esse — a
       # versão fixada responde e a chave passa no teste. Sem a chave, ela pula; o
       # cabeçalho dela tem a receita para rodar contra a API de verdade.
+      #
+      # `modelos-do-parceiro-editar-apagar` entrou aqui em 2026-09-26: o servidor
+      # do app tem de NASCER apontado para um dublê do provedor intermediado
+      # (ZERNIO_API_BASE_URL + conta e chave), e isso é ambiente do `next start`,
+      # não da spec — ligá-lo no `.env.e2e` de todas as partes mudaria o que as
+      # outras specs medem. Roda local; o comando está no cabeçalho da spec.
       FORA_DO_CI: >-
         inbox-tempo-real.spec.ts
         cadastro-sem-confirmacao-de-email.spec.ts
         aviso-de-caso-chega-no-whatsapp.spec.ts
         jev-chave-real.spec.ts
+        modelos-do-parceiro-editar-apagar.spec.ts
     steps:
       # ── O RELÓGIO DESTA PARTE: ONDE O TETO DE 30 MIN COMEÇA A CONTAR ──────
       #
@@ -1557,8 +1681,79 @@ jobs:
           # que é o org id do DEFAULT_SENTRY_DSN (lib/sentry/dsn.ts:17).
           SENTRY_DSN: "off"
 
+      # ─── O browser não pesa; o espelho do apt é que pesa ───────────────────
+      #
+      # "Instalar o browser" levou de 27 s a 425 s por parte no run
+      # 36757657107 (main e8e291217) — e o browser não tem nada com isso. Os
+      # TRÊS downloads do Playwright (Chrome for Testing, FFmpeg, headless
+      # shell) custaram 8–9 s em TODAS as seis partes. O que variou foi o
+      # `apt-get` do `--with-deps`, baixando os mesmos 32–35 MB de .deb (xvfb,
+      # mesa, fontes) do `azure.archive.ubuntu.com`:
+      #
+      #   parte 6: 34,9 MB em 2 s   (14,6 MB/s)
+      #   parte 3: 32,1 MB em 8 s   (3,9 MB/s)
+      #   parte 1: 32,1 MB em 150 s (214 kB/s)
+      #   parte 2: 32,1 MB em 204 s (158 kB/s)
+      #   parte 5: 34,9 MB em 380 s (91,7 kB/s)
+      #   parte 4: 34,9 MB em 398 s (87,6 kB/s)
+      #
+      # Mesmo espelho, mesmo minuto, velocidade de 87 kB/s a 14 MB/s: é sorteio,
+      # e o sorteio comia até 6,6 min de um orçamento de 24. Cachear
+      # `~/.cache/ms-playwright` (o palpite óbvio) compraria 8 s e pagaria
+      # ~300 MB de cota de cache por chave — não entra.
+      #
+      # O que entra: o apt passa a guardar os .deb numa pasta do usuário, e ela
+      # vai para o `actions/cache`. Com a pasta restaurada, o `apt-get` acha os
+      # arquivos já baixados, confere o hash de cada um contra o índice recém-
+      # atualizado, e só desce o que mudou de versão. Nenhum pacote deixa de
+      # ser instalado — o `--with-deps` roda igual, só sem a fila do espelho.
+      #
+      # Chave: imagem do runner (`ImageOS`-`ImageVersion`) + versão do
+      # Playwright. A imagem nova (semanal) renova a chave e, pelo
+      # `restore-keys`, parte dos .deb da anterior; versão nova do Playwright
+      # pode mudar a LISTA de pacotes, por isso também renova.
+      # ponytail: a pasta acumula versões velhas entre imagens (só o que mudou,
+      # ~dezenas de MB); se um dia pesar, `apt-get autoclean` antes de salvar.
+      #
+      # Só em máquina do GitHub: no executor próprio o runner é um contêiner
+      # com apt e `sudo` próprios, e lá o passo segue como era (NÃO MEDIDO se
+      # o espelho pesa naquela máquina).
+      - name: Apontar o cache do apt para uma pasta cacheável
+        if: runner.environment == 'github-hosted'
+        id: debs
+        run: |
+          set -euo pipefail
+          pasta="$HOME/.cache/playwright-apt"
+          mkdir -p "$pasta/partial"
+          printf 'Dir::Cache::Archives "%s/";\nAPT::Keep-Downloaded-Packages "true";\n' "$pasta" \
+            | sudo tee /etc/apt/apt.conf.d/99-debs-do-playwright >/dev/null
+          pw=$(pnpm exec playwright --version | awk '{print $2}')
+          : "${ImageOS:?runner do GitHub sem ImageOS — a chave do cache ficaria sem a imagem}"
+          : "${ImageVersion:?runner do GitHub sem ImageVersion}"
+          echo "prefixo=playwright-apt-${ImageOS}-pw${pw}-" >> "$GITHUB_OUTPUT"
+          echo "imagem=${ImageVersion}" >> "$GITHUB_OUTPUT"
+
+      - name: Restaurar os .deb do browser
+        if: runner.environment == 'github-hosted'
+        id: debs-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/playwright-apt/*.deb
+          key: ${{ steps.debs.outputs.prefixo }}${{ steps.debs.outputs.imagem }}
+          restore-keys: ${{ steps.debs.outputs.prefixo }}
+
       - name: Instalar o browser
         run: pnpm exec playwright install --with-deps chromium
+
+      # Salva logo depois de instalar, e não no fim do job: o `actions/cache`
+      # comum só grava se o job passar, e a parte que estoura o teto — a que
+      # mais precisa do cache na rodada seguinte — nunca gravaria.
+      - name: Guardar os .deb do browser
+        if: runner.environment == 'github-hosted' && steps.debs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/playwright-apt/*.deb
+          key: ${{ steps.debs.outputs.prefixo }}${{ steps.debs.outputs.imagem }}
 
       # `.env.local` é CÓPIA do `.env.e2e`, não uma terceira redação dele.
       #
@@ -1801,7 +1996,7 @@ jobs:
       # workers, dois specs gerando o mesmo código no mesmo intervalo de 30s
       # fazem o segundo ser recusado como replay. Foi o que derrubava a
       # `reset-password-mfa` (issue #80): ela passa sozinha e falha em paralelo.
-      - name: E2E — parte ${{ matrix.parte }} de 4
+      - name: E2E — parte ${{ matrix.parte }} de ${{ strategy.job-total }}
         run: |
           set -euo pipefail
           # A lista sai da matrix, e as duas variáveis continuam existindo no
@@ -1814,6 +2009,7 @@ jobs:
             3) LISTA="$SPECS_PARTE_3" ;;
             4) LISTA="$SPECS_PARTE_4" ;;
             5) LISTA="$SPECS_PARTE_5" ;;
+            6) LISTA="$SPECS_PARTE_6" ;;
             *) echo "::error::parte ${{ matrix.parte }} sem lista"; exit 1 ;;
           esac
           # Falha alto se a variável vier vazia: sem isto, um typo no nome faria
@@ -1932,6 +2128,17 @@ jobs:
           path: |
             playwright-report/
             test-results/
+          retention-days: 7
+
+      # A prova das três telas do roteador deve existir também quando o teste
+      # passa. Apenas capturas sintéticas deste teste, sem traces ou credenciais.
+      - name: Guardar prova visual do roteador JEV
+        if: ${{ !cancelled() && matrix.parte == 5 }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: jev-roteador-telas
+          path: test-results/**/jev-roteador-*.png
+          if-no-files-found: ignore
           retention-days: 7
 
       # ── ONDE A MEDIÇÃO FICA ───────────────────────────────────────────────
@@ -2105,7 +2312,7 @@ jobs:
                       dentro { exit }
                     ' .github/workflows/e2e.yml | grep -oE "[a-z0-9-]+\.spec\.ts" | sort -u; }
           NO_DISCO=$(ls tests/e2e/*.spec.ts | wc -l | tr -d " ")
-          RODOU=$( { bloco SPECS_PARTE_1; bloco SPECS_PARTE_2; bloco SPECS_PARTE_3; bloco SPECS_PARTE_4; bloco SPECS_PARTE_5; } | sort -u | wc -l | tr -d " ")
+          RODOU=$( { bloco SPECS_PARTE_1; bloco SPECS_PARTE_2; bloco SPECS_PARTE_3; bloco SPECS_PARTE_4; bloco SPECS_PARTE_5; bloco SPECS_PARTE_6; } | sort -u | wc -l | tr -d " ")
           FORA_LISTA=$(bloco FORA_DO_CI)
           FORA=$(echo "$FORA_LISTA" | grep -c . || true)
           # E o recorte passa a ter CONTROLE, não só um piso.
@@ -2132,5 +2339,5 @@ jobs:
             for s in $FORA_LISTA; do echo "- \`${s}\` — fora do CI de propósito: o motivo de cada uma está no comentário do bloco FORA_DO_CI, no topo deste workflow"; done
             echo ""
             echo "A soma é conferida mecanicamente por \`tests/unit/e2e-cobertura-completa.test.ts\`:"
-            echo "spec no disco que não esteja em nenhuma das quatro listas reprova o build."
+            echo "spec no disco que não esteja em nenhuma das listas reprova o build."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -19,12 +19,18 @@ import { campanhaRespostaHandler } from "@/lib/campanhas/resposta.handler";
 import { followupGatilhoEtapaHandler } from "@/lib/followup/gatilho-etapa.handler";
 import { followupGatilhoLeadHandler } from "@/lib/followup/gatilho-lead.handler";
 import { followupGatilhoCasoHandler } from "@/lib/followup/gatilho-caso.handler";
+import { casoNaCentralHandler } from "@/lib/escalacao/caso-na-central.handler";
 import { mediaPersistHandler } from "@/workers/media-persist-worker.handler";
 import { mediaDeriveHandler } from "@/workers/media-derive-worker.handler";
+import { CONSUMIDORES_DOS_CANAIS } from "@/lib/channels/consumidores";
 import { webPushInboundHandler } from "@/lib/notifications/push.handler";
+import { conversaoDeQualificacaoHandler } from "@/lib/conversoes/qualificacao.handler";
+import { conversaoDeEtapaMetaHandler } from "@/lib/conversoes/etapa-meta.handler";
 import { conversaoDeVendaHandler } from "@/lib/conversoes/envio.handler";
+import { avisoDeEtapaHandler } from "@/lib/leads/aviso-de-etapa.handler";
 import { avisoDeCasoAoSuporteHandler } from "@/lib/escalacao/aviso-ao-suporte.handler";
 import { avisoAoNodusHandler } from "@/lib/escalacao/aviso-ao-nodus.handler";
+import { avisoDePropostaNoWhatsAppHandler } from "@/lib/propostas/aviso-no-whatsapp.handler";
 import { registerHandler } from "@/lib/event-log/dispatcher";
 
 let _registered = false;
@@ -50,11 +56,20 @@ export function ensureHandlersRegistered(): void {
   registerHandler(lgpdRedactHandler);
   registerHandler(automationRulesHandler);
   registerHandler(followupGatilhoEtapaHandler);
+  // Escrita curta no banco (um item na Central), vizinha do gatilho de etapa
+  // que consome o mesmo evento.
+  registerHandler(avisoDeEtapaHandler);
   registerHandler(followupGatilhoLeadHandler);
   registerHandler(followupGatilhoCasoHandler);
+  // O caso aberto na Central, na hora — escrita curta no banco (um item), ao
+  // lado do outro consumidor de `ai.case_opened` que só escreve no banco, e
+  // longe do aviso ao suporte, que sai por rede de terceiro.
+  registerHandler(casoNaCentralHandler);
   registerHandler(followupGatilhoPresencaHandler);
   registerHandler(mediaPersistHandler);
   registerHandler(mediaDeriveHandler);
+  // Os consumidores dos canais (ex.: o pino que entrou sem coordenadas).
+  for (const consumidor of CONSUMIDORES_DOS_CANAIS) registerHandler(consumidor);
   registerHandler(webPushInboundHandler);
   // Penúltimo, pelo MESMO critério do último: o aviso ao suporte sai por rede de
   // terceiro (o transporte de WhatsApp) e nunca pode atrasar quem escreve no
@@ -64,9 +79,14 @@ export function ensureHandlersRegistered(): void {
   registerHandler(avisoDeCasoAoSuporteHandler);
   // Mesmo critério: rede de terceiro (Nodus), nunca atrasa quem escreve no banco.
   registerHandler(avisoAoNodusHandler);
+  // Mesmo critério do de cima: sai por rede de terceiro, depois de quem só
+  // escreve no banco. Consome o MESMO evento que a notificação do navegador.
+  registerHandler(avisoDePropostaNoWhatsAppHandler);
   // Por último: reportar a venda ao anúncio é o consumidor mais externo do
   // fechamento — depende de rede de terceiro e não pode atrasar quem escreve
   // no banco. Falha dele nunca segura os handlers acima.
   registerHandler(conversaoDeVendaHandler);
+  registerHandler(conversaoDeQualificacaoHandler);
+  registerHandler(conversaoDeEtapaMetaHandler);
   _registered = true;
 }
