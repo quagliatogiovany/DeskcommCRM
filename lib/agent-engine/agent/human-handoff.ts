@@ -272,6 +272,20 @@ export async function performHumanHandoff(
     ],
   );
 
+  // (d2) Anuncia no barramento pra quem avisa o dono (Nodus). Best-effort: o
+  // aviso não pode derrubar a passagem que ele descreve.
+  try {
+    await db.query(
+      `select public.emit_event('ai.handoff_opened', 'conversation', $1::uuid,
+         jsonb_build_object('conversation_id', $1::text), '{}'::jsonb, $2::uuid)`,
+      [ids.conversationId, ids.tenantId],
+    );
+  } catch (err) {
+    opts.log.warn('handoff: evento não emitido', {
+      error: err instanceof Error ? err.message.slice(0, 200) : 'erro desconhecido',
+    });
+  }
+
   // (e) A IDA na linha do tempo do NEGÓCIO. `triggerHandoff` (o caminho do CRM)
   // já gravava `handoff_triggered`; este caminho — o do harness e o do "Assumir
   // eu" dos casos — não gravava nada. Metade das passagens era invisível no

@@ -279,6 +279,10 @@ export async function publishFirstVersion(
       credential_id: credentialId,
       tool_ids: selection ? [] : capacidadesPadraoDoOnboarding(),
       pipeline_ids: pipelineIds,
+      // Casos ligados desde o nascimento: sem isso o agente promete "vou verificar
+      // com a loja" (frete grátis, desconto...) e ninguém é avisado — a tool
+      // open_human_case só existe com cases_enabled.
+      cases_enabled: !selection,
       channel_session_id: canal.id,
       status: "draft",
       created_by: userId,
