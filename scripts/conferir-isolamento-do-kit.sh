@@ -57,6 +57,16 @@
 # Sem resposta, REPROVA — gate que pula em silêncio não é gate.
 set -euo pipefail
 
+# ⚠️ FORK: este gate compara com a última release PUBLICADA e com a tag v1.63.0, e as duas
+# vivem no repositório original (`melgarafael/DeskcommCRM`). O fork não tem releases nem
+# essas tags, então o gate nunca acharia o que comparar e reprovaria todo PR. Em fork ele
+# PULA, em voz alta — a conferência continua valendo no upstream e ao mergear dele.
+# Fora do Actions (`GITHUB_REPOSITORY` vazio) e no repositório original, nada muda.
+if [ -n "${GITHUB_REPOSITORY:-}" ] && [ "${GITHUB_REPOSITORY}" != "melgarafael/DeskcommCRM" ]; then
+  echo "AVISO: conferência de isolamento do update.sh PULADA — '${GITHUB_REPOSITORY}' é um fork, sem as releases/tags que o gate compara." >&2
+  exit 0
+fi
+
 CONTAINER="${1:?uso: $0 <container> <banco>}"
 BANCO="${2:?uso: $0 <container> <banco>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
