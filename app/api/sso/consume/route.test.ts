@@ -71,7 +71,7 @@ function requisicao(qs: string) {
 async function destinoDoDocumento(res: Response): Promise<string> {
   expect(res.status).toBe(200);
   const m = /window\.location\.replace\(("[^"]+")\)/.exec(await res.text());
-  return m ? (JSON.parse(m[1]) as string) : "";
+  return m ? (JSON.parse(m[1] ?? "\"\"") as string) : "";
 }
 
 function destino(res: Response): string {

@@ -74,6 +74,14 @@ const ALLOWED = [
 const KNOWN_DEBT: { reason: string; files: string[] }[] = [
   {
     reason:
+      "FORK (Nodus): a exclusão de loja (`DELETE /api/internal/provisioning/org`) faz logout e " +
+      "apaga as sessões do transporte legado antes de apagar a organização, e falha FECHADO se o " +
+      "transporte recusar. É control plane de sessão, a mesma natureza da lista abaixo, e sai " +
+      "junto com `lib/waha/` quando ele for absorvido por `lib/channels/`.",
+    files: ["app/api/internal/provisioning/org/route.ts"],
+  },
+  {
+    reason:
       "Superfície de TRANSPORTE do provider legado (control plane de sessão, " +
       "webhook receiver, download de mídia). Mesma natureza de `lib/waha/`, que " +
       "já é exceção: não são features perguntando identidade, são o próprio " +
