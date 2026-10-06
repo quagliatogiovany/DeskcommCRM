@@ -15,7 +15,7 @@ import {
   MAXIMO_DE_ETIQUETAS_NO_FILTRO,
   MODOS_DE_ETIQUETA,
 } from "@/lib/inbox/marcador-da-conversa";
-import { isValidCpf, type PerfilDoPais } from "@/lib/legal/perfil-do-pais";
+import { isValidCpf, PAIS_PADRAO, type PerfilDoPais } from "@/lib/legal/perfil-do-pais";
 
 const PHONE_REGEX = /^\+\d{8,15}$/;
 
@@ -100,12 +100,19 @@ export function contactCreateSchemaDoPais(perfil: PerfilDoPais) {
  * O E.164 é universal; o EXEMPLO não. A mensagem de erro cravava
  * `+5511999998888`, então a tela mostrava o exemplo do país no campo e ensinava
  * o DDI brasileiro assim que a pessoa errava — dentro do mesmo formulário.
+ *
+ * ⚠️ FORK: no Brasil aceita o que a pessoa digita — `48999990000` (DDD + número),
+ * `5548999990000` ou `+55 (48) 99999-0000` — e normaliza para E.164 antes de validar
+ * (`normalizarTelefoneDigitado`). Esta função SOBRESCREVE o `phone_number` do schema base,
+ * então a normalização tem de estar aqui também, senão a tela e a API do contato recusam o
+ * número sem `+55`. Fora do Brasil a regra de "10/11 dígitos = DDD" não vale: segue E.164 puro.
  */
 function telefoneDoPais(perfil: PerfilDoPais) {
-  return z
+  const regra = z
     .string()
-    .regex(PHONE_REGEX, `Telefone deve estar em formato E.164 (${perfil.telefoneExemplo})`)
-    .optional();
+    .regex(PHONE_REGEX, `Telefone deve estar em formato E.164 (${perfil.telefoneExemplo})`);
+  const base = perfil.codigo === PAIS_PADRAO ? z.string().transform(normalizarTelefoneDigitado).pipe(regra) : regra;
+  return base.optional();
 }
 
 /** O mesmo, para o PATCH (`app/api/v1/contacts/[id]/route.ts`). */

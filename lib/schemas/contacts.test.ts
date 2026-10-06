@@ -9,10 +9,13 @@
  *  - contactListQuerySchema coerces `limit` and clamps boundaries
  */
 import { describe, expect, it } from "vitest";
+import { perfilDoPais } from "@/lib/legal/perfil-do-pais";
 import {
   contactCreateSchema,
+  contactCreateSchemaDoPais,
   contactListQuerySchema,
   contactPatchSchema,
+  contactPatchSchemaDoPais,
   isValidCpf,
   lgpdAnonymizeSchema,
 } from "./contacts";
@@ -172,5 +175,32 @@ describe("lgpdAnonymizeSchema", () => {
       justification: "Solicitação formal LGPD do titular do dado.",
     });
     expect(r.success).toBe(true);
+  });
+});
+
+// FORK: a tela e a API do contato validam por `...SchemaDoPais`, que sobrescreve o telefone do
+// schema base. Sem a normalização lá, "48999990000" era recusado mesmo com o schema base aceitando.
+describe("telefone nos schemas por país (tela e API de contato)", () => {
+  const br = perfilDoPais("BR");
+  const pt = perfilDoPais("PT");
+
+  it.each([
+    ["48999990000", "+5548999990000"],
+    ["(48) 99999-0000", "+5548999990000"],
+    ["5548999990000", "+5548999990000"],
+    ["+5548999990000", "+5548999990000"],
+  ])("BR: %s vira %s (criar e editar)", (digitado, e164) => {
+    const criar = contactCreateSchemaDoPais(br).safeParse({ phone_number: digitado });
+    expect(criar.success && criar.data.phone_number).toBe(e164);
+    const editar = contactPatchSchemaDoPais(br).safeParse({ phone_number: digitado });
+    expect(editar.success && editar.data.phone_number).toBe(e164);
+  });
+
+  it("BR: lixo continua recusado", () => {
+    expect(contactCreateSchemaDoPais(br).safeParse({ phone_number: "abc123" }).success).toBe(false);
+  });
+
+  it("fora do BR: 11 dígitos sem + NÃO vira +55 (segue E.164 puro)", () => {
+    expect(contactCreateSchemaDoPais(pt).safeParse({ phone_number: "48999990000" }).success).toBe(false);
   });
 });
