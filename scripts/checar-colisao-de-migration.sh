@@ -109,7 +109,9 @@
 # Uso: bash scripts/checar-colisao-de-migration.sh [base]      (padrão: origin/main)
 set -uo pipefail
 
-BASE="${1:-origin/main}"
+# Em PR a base é a branch-alvo (`GITHUB_BASE_REF`), não `main`: no fork a `main` é uma linha velha e
+# divergente, e medir contra ela reprova todo PR (migration já renumerada vira "colisão").
+BASE="${1:-origin/${GITHUB_BASE_REF:-main}}"
 if ! cd "$(git rev-parse --show-toplevel 2>/dev/null)"; then
   echo "::error::não estou dentro de um repositório git — não há árvore para medir."
   exit 2

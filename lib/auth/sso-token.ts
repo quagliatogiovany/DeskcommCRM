@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const SECRET = (): string => process.env.CRM_SSO_SECRET ?? "dev-fallback";
+const SECRET = (): string => process.env.CRM_SSO_SECRET?.trim() || "dev-fallback";
 
 export interface SsoPayload {
   organization_id: string;
