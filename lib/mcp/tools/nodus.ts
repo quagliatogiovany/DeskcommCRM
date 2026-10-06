@@ -15,8 +15,33 @@
  */
 import { z } from "zod";
 
-import type { McpToolDefinition } from "../types";
+import type { McpContext, McpToolDefinition } from "../types";
 import { NodusApiError, nodusRequest, mensagemParaCodigoNodus } from "./nodus-client";
+
+/**
+ * Quem é o cliente desta chamada. DENTRO do turno de um agente é SEMPRE o contato da conversa:
+ * o `telefone` que o modelo escreveu é ignorado, porque ele é parâmetro livre — um cliente que
+ * escrevesse "o que o número X pediu?" faria a IA consultar/criar pedido em nome de outra pessoa.
+ * O Nodus só confere "esse telefone é cliente da loja", não quem pergunta (backlog
+ * `crm-ferramentas-nodus-telefone-livre`, repo do Nodus). Fora do turno (MCP externo, rota HTTP)
+ * não há contato de conversa, e o `telefone` informado vale, como antes.
+ *
+ * Devolve null quando o turno tem contato mas ele não tem telefone: falha FECHADO, nunca cai no
+ * `telefone` do modelo.
+ */
+async function telefoneDaChamada(ctx: McpContext, informado: string): Promise<string | null> {
+  if (!ctx.contatoDoTurno) return informado;
+  const { data } = await ctx.supabase
+    .from("contacts")
+    .select("phone_number")
+    .eq("organization_id", ctx.organizationId)
+    .eq("id", ctx.contatoDoTurno)
+    .maybeSingle();
+  const telefone = ((data?.phone_number as string | null) ?? "").trim();
+  return telefone === "" ? null : telefone;
+}
+
+const MSG_SEM_TELEFONE = "Não consegui identificar o telefone deste cliente na conversa, então não posso consultar a loja.";
 
 // ---------------------------------------------------------------------------
 // nodus_consultar_catalogo
@@ -51,11 +76,13 @@ export const nodusConsultarCatalogo: McpToolDefinition<typeof consultarCatalogoI
   requiresRole: "agent",
   requiresScope: "mcp:read",
   handler: async (input, ctx) => {
+    const telefone = await telefoneDaChamada(ctx, input.telefone);
+    if (!telefone) return { sucesso: false, mensagem: MSG_SEM_TELEFONE };
     try {
       const body = (await nodusRequest(ctx, {
         method: "GET",
         path: "api/integrations/deskcomm/catalogo",
-        query: { telefone: input.telefone },
+        query: { telefone },
       })) as { produtos: NodusCatalogoItem[] };
       return { sucesso: true, produtos: body.produtos };
     } catch (err) {
@@ -95,11 +122,13 @@ export const nodusStatusPedido: McpToolDefinition<typeof statusPedidoInputShape>
   requiresRole: "agent",
   requiresScope: "mcp:read",
   handler: async (input, ctx) => {
+    const telefone = await telefoneDaChamada(ctx, input.telefone);
+    if (!telefone) return { sucesso: false, mensagem: MSG_SEM_TELEFONE };
     try {
       const body = (await nodusRequest(ctx, {
         method: "GET",
         path: "api/integrations/deskcomm/pedidos",
-        query: { telefone: input.telefone, limite: String(input.limite) },
+        query: { telefone: telefone, limite: String(input.limite) },
       })) as { pedidos: NodusPedidoResumo[] };
       return { sucesso: true, pedidos: body.pedidos };
     } catch (err) {
@@ -169,12 +198,14 @@ export const nodusCriarPedido: McpToolDefinition<typeof criarPedidoInputShape> =
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
+    const telefone = await telefoneDaChamada(ctx, input.telefone);
+    if (!telefone) return { sucesso: false, mensagem: MSG_SEM_TELEFONE };
     try {
       const body = (await nodusRequest(ctx, {
         method: "POST",
         path: "api/integrations/deskcomm/pedidos",
         body: {
-          telefone: input.telefone,
+          telefone: telefone,
           endereco: input.endereco,
           bairro: input.bairro,
           nome: input.nome,
@@ -214,11 +245,13 @@ export const nodusSolicitarCancelamento: McpToolDefinition<typeof solicitarCance
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
+    const telefone = await telefoneDaChamada(ctx, input.telefone);
+    if (!telefone) return { sucesso: false, mensagem: MSG_SEM_TELEFONE };
     try {
       const body = (await nodusRequest(ctx, {
         method: "POST",
         path: "api/integrations/deskcomm/pedidos/cancelamento",
-        body: { telefone: input.telefone, orderId: input.order_id, motivo: input.motivo },
+        body: { telefone: telefone, orderId: input.order_id, motivo: input.motivo },
       })) as { orderId: string; status: string };
       return { sucesso: true, ...body };
     } catch (err) {
@@ -280,11 +313,13 @@ export const nodusValidarCodigoIndicacao: McpToolDefinition<typeof validarCodigo
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
+    const telefone = await telefoneDaChamada(ctx, input.telefone);
+    if (!telefone) return { sucesso: false, mensagem: MSG_SEM_TELEFONE };
     try {
       const body = await nodusRequest(ctx, {
         method: "POST",
         path: "api/integrations/deskcomm/clientes/validar-codigo",
-        body: { telefone: input.telefone, codigo: input.codigo },
+        body: { telefone: telefone, codigo: input.codigo },
       });
       return { sucesso: true, ...(body as object) };
     } catch (err) {
@@ -317,11 +352,13 @@ export const nodusAtivarCliente: McpToolDefinition<typeof ativarClienteInputShap
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
+    const telefone = await telefoneDaChamada(ctx, input.telefone);
+    if (!telefone) return { sucesso: false, mensagem: MSG_SEM_TELEFONE };
     try {
       const body = await nodusRequest(ctx, {
         method: "POST",
         path: "api/integrations/deskcomm/clientes/ativar",
-        body: { telefone: input.telefone, nome: input.nome, endereco: input.endereco },
+        body: { telefone: telefone, nome: input.nome, endereco: input.endereco },
       });
       return { sucesso: true, ...(body as object) };
     } catch (err) {
