@@ -38920,6 +38920,154 @@ alter table public.recuperacao_config enable row level security;
 
 drop policy if exists recuperacao_config_select on public.recuperacao_config;
 create policy recuperacao_config_select on public.recuperacao_config
+  for select using (
+    (organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin()
+  );
+
+drop policy if exists recuperacao_config_write on public.recuperacao_config;
+create policy recuperacao_config_write on public.recuperacao_config
+  using (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  )
+  with check (
+    public.fn_is_platform_admin()
+    or ((organization_id in (select public.fn_user_org_ids()))
+        and public.fn_role_at_least(organization_id, 'manager'))
+  );
+
+revoke all on public.recuperacao_config from anon, authenticated;
+grant select on public.recuperacao_config to authenticated;
+grant all on public.recuperacao_config to service_role;
+
+alter table public.campaigns add column if not exists origem text not null default 'manual';
+alter table public.campaigns add column if not exists rodada_data date;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'campaigns_origem_check'
+  ) then
+    alter table public.campaigns add constraint campaigns_origem_check check (origem in ('manual', 'recuperacao'));
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'campaigns_recuperacao_exige_rodada_data'
+  ) then
+    alter table public.campaigns
+      add constraint campaigns_recuperacao_exige_rodada_data check (origem <> 'recuperacao' or rodada_data is not null);
+  end if;
+end $$;
+
+comment on column public.campaigns.origem is
+  'De onde a campanha nasceu. ''recuperacao'' = aberta por lib/recuperacao (cron ou botão Disparar agora), nunca criada direto pela rota POST /api/v1/campaigns.';
+comment on column public.campaigns.rodada_data is
+  'Só em origem=recuperacao: a data (fuso da organização) desta rodada. Par com a unicidade abaixo — impede duas rodadas de recuperação no mesmo dia por organização, mesmo com cron duplicado ou reiniciado.';
+
+create unique index if not exists campaigns_recuperacao_uma_por_dia_uidx
+  on public.campaigns (organization_id, rodada_data)
+  where origem = 'recuperacao';
+
+-- ---- fn_leads_por_horario: heatmap de chegada do lead por dia×hora (migration 0560) ----
+-- "Lead entrou em contato" = conversa cuja 1ª mensagem de toda a vida foi
+-- inbound. Fuso validado contra pg_timezone_names, cai em America/Sao_Paulo se
+-- o valor salvo na organização não existir. Ver cabeçalho da migration 0560.
+create or replace function public.fn_leads_por_horario(
+  p_org uuid,
+  p_from timestamptz,
+  p_to timestamptz
+) returns jsonb
+language sql stable
+set search_path = public
+as $$
+  with fuso as (
+    select coalesce(
+      (select o.timezone from public.organizations o
+        where o.id = p_org
+          and o.timezone in (select name from pg_timezone_names)),
+      'America/Sao_Paulo'
+    ) as tz
+  ),
+  primeiro_contato as (
+    select m.conversation_id,
+           (array_agg(m.sent_at order by m.sent_at))[1] as chegou_em,
+           (array_agg(m.direction order by m.sent_at))[1] as primeira_direcao
+      from public.messages m
+      join public.conversations c
+        on c.id = m.conversation_id and c.organization_id = m.organization_id
+     where m.organization_id = p_org
+       and c.is_group = false
+     group by m.conversation_id
+  ),
+  janela as (
+    select conversation_id, chegou_em
+      from primeiro_contato
+     where primeira_direcao = 'inbound'
+       and chegou_em >= p_from and chegou_em < p_to
+  ),
+  resposta as (
+    select j.conversation_id, j.chegou_em,
+           min(m.sent_at) filter (where m.direction = 'outbound' and m.sent_via = 'ai') as resp_ia,
+           min(m.sent_at) filter (
+             where m.direction = 'outbound' and m.sent_via in ('user', 'external_device')
+           ) as resp_humano
+      from janela j
+      join public.messages m
+        on m.conversation_id = j.conversation_id and m.organization_id = p_org
+     group by j.conversation_id, j.chegou_em
+  ),
+  r_tz as (
+    select r.*, (r.chegou_em at time zone fuso.tz) as chegou_em_local
+      from resposta r, fuso
+  ),
+  grade as (
+    select extract(isodow from chegou_em_local)::int as dow,
+           extract(hour from chegou_em_local)::int as hora,
+           count(*) as leads,
+           count(*) filter (where resp_ia is not null or resp_humano is not null) as respondidos,
+           count(*) filter (where resp_ia is null and resp_humano is null) as sem_resposta
+      from r_tz
+     group by 1, 2
+  ),
+  por_hora as (
+    select extract(hour from chegou_em_local)::int as hora,
+           count(*) as leads,
+           percentile_cont(0.5) within group (
+             order by extract(epoch from (resp_ia - chegou_em))
+           ) filter (where resp_ia is not null) as p50_resposta_ia_s,
+           percentile_cont(0.5) within group (
+             order by extract(epoch from (resp_humano - chegou_em))
+           ) filter (where resp_humano is not null) as p50_resposta_humano_s,
+           count(*) filter (where resp_ia is null and resp_humano is null) as sem_resposta
+      from r_tz
+     group by 1
+  )
+  select jsonb_build_object(
+    'timezone', (select tz from fuso),
+    'grade', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'dow', dow, 'hora', hora, 'leads', leads,
+          'respondidos', respondidos, 'sem_resposta', sem_resposta
+        ) order by dow, hora
+      ) from grade
+    ), '[]'::jsonb),
+    'por_hora', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'hora', hora, 'leads', leads,
+          'p50_resposta_ia_s', p50_resposta_ia_s,
+          'p50_resposta_humano_s', p50_resposta_humano_s,
+          'sem_resposta', sem_resposta
+        ) order by hora
+      ) from por_hora
+    ), '[]'::jsonb)
+  );
+$$;
+
+revoke all on function public.fn_leads_por_horario(uuid, timestamptz, timestamptz) from public, anon;
+grant execute on function public.fn_leads_por_horario(uuid, timestamptz, timestamptz) to authenticated, service_role;
+
 -- ---- autoria "em nome de" na mensagem (migration 0416, issue #1613) ----
 --
 -- Coluna nova, nullable, sem backfill e sem policy nova: a RLS por organização
@@ -40077,149 +40225,6 @@ create policy crm_proposals_select on public.crm_proposals
     (organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin()
   );
 
-drop policy if exists recuperacao_config_write on public.recuperacao_config;
-create policy recuperacao_config_write on public.recuperacao_config
-  using (
-    public.fn_is_platform_admin()
-    or ((organization_id in (select public.fn_user_org_ids()))
-        and public.fn_role_at_least(organization_id, 'manager'))
-  )
-  with check (
-    public.fn_is_platform_admin()
-    or ((organization_id in (select public.fn_user_org_ids()))
-        and public.fn_role_at_least(organization_id, 'manager'))
-  );
-
-revoke all on public.recuperacao_config from anon, authenticated;
-grant select on public.recuperacao_config to authenticated;
-grant all on public.recuperacao_config to service_role;
-
-alter table public.campaigns add column if not exists origem text not null default 'manual';
-alter table public.campaigns add column if not exists rodada_data date;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint where conname = 'campaigns_origem_check'
-  ) then
-    alter table public.campaigns add constraint campaigns_origem_check check (origem in ('manual', 'recuperacao'));
-  end if;
-  if not exists (
-    select 1 from pg_constraint where conname = 'campaigns_recuperacao_exige_rodada_data'
-  ) then
-    alter table public.campaigns
-      add constraint campaigns_recuperacao_exige_rodada_data check (origem <> 'recuperacao' or rodada_data is not null);
-  end if;
-end $$;
-
-comment on column public.campaigns.origem is
-  'De onde a campanha nasceu. ''recuperacao'' = aberta por lib/recuperacao (cron ou botão Disparar agora), nunca criada direto pela rota POST /api/v1/campaigns.';
-comment on column public.campaigns.rodada_data is
-  'Só em origem=recuperacao: a data (fuso da organização) desta rodada. Par com a unicidade abaixo — impede duas rodadas de recuperação no mesmo dia por organização, mesmo com cron duplicado ou reiniciado.';
-
-create unique index if not exists campaigns_recuperacao_uma_por_dia_uidx
-  on public.campaigns (organization_id, rodada_data)
-  where origem = 'recuperacao';
-
--- ---- fn_leads_por_horario: heatmap de chegada do lead por dia×hora (migration 0560) ----
--- "Lead entrou em contato" = conversa cuja 1ª mensagem de toda a vida foi
--- inbound. Fuso validado contra pg_timezone_names, cai em America/Sao_Paulo se
--- o valor salvo na organização não existir. Ver cabeçalho da migration 0560.
-create or replace function public.fn_leads_por_horario(
-  p_org uuid,
-  p_from timestamptz,
-  p_to timestamptz
-) returns jsonb
-language sql stable
-set search_path = public
-as $$
-  with fuso as (
-    select coalesce(
-      (select o.timezone from public.organizations o
-        where o.id = p_org
-          and o.timezone in (select name from pg_timezone_names)),
-      'America/Sao_Paulo'
-    ) as tz
-  ),
-  primeiro_contato as (
-    select m.conversation_id,
-           (array_agg(m.sent_at order by m.sent_at))[1] as chegou_em,
-           (array_agg(m.direction order by m.sent_at))[1] as primeira_direcao
-      from public.messages m
-      join public.conversations c
-        on c.id = m.conversation_id and c.organization_id = m.organization_id
-     where m.organization_id = p_org
-       and c.is_group = false
-     group by m.conversation_id
-  ),
-  janela as (
-    select conversation_id, chegou_em
-      from primeiro_contato
-     where primeira_direcao = 'inbound'
-       and chegou_em >= p_from and chegou_em < p_to
-  ),
-  resposta as (
-    select j.conversation_id, j.chegou_em,
-           min(m.sent_at) filter (where m.direction = 'outbound' and m.sent_via = 'ai') as resp_ia,
-           min(m.sent_at) filter (
-             where m.direction = 'outbound' and m.sent_via in ('user', 'external_device')
-           ) as resp_humano
-      from janela j
-      join public.messages m
-        on m.conversation_id = j.conversation_id and m.organization_id = p_org
-     group by j.conversation_id, j.chegou_em
-  ),
-  r_tz as (
-    select r.*, (r.chegou_em at time zone fuso.tz) as chegou_em_local
-      from resposta r, fuso
-  ),
-  grade as (
-    select extract(isodow from chegou_em_local)::int as dow,
-           extract(hour from chegou_em_local)::int as hora,
-           count(*) as leads,
-           count(*) filter (where resp_ia is not null or resp_humano is not null) as respondidos,
-           count(*) filter (where resp_ia is null and resp_humano is null) as sem_resposta
-      from r_tz
-     group by 1, 2
-  ),
-  por_hora as (
-    select extract(hour from chegou_em_local)::int as hora,
-           count(*) as leads,
-           percentile_cont(0.5) within group (
-             order by extract(epoch from (resp_ia - chegou_em))
-           ) filter (where resp_ia is not null) as p50_resposta_ia_s,
-           percentile_cont(0.5) within group (
-             order by extract(epoch from (resp_humano - chegou_em))
-           ) filter (where resp_humano is not null) as p50_resposta_humano_s,
-           count(*) filter (where resp_ia is null and resp_humano is null) as sem_resposta
-      from r_tz
-     group by 1
-  )
-  select jsonb_build_object(
-    'timezone', (select tz from fuso),
-    'grade', coalesce((
-      select jsonb_agg(
-        jsonb_build_object(
-          'dow', dow, 'hora', hora, 'leads', leads,
-          'respondidos', respondidos, 'sem_resposta', sem_resposta
-        ) order by dow, hora
-      ) from grade
-    ), '[]'::jsonb),
-    'por_hora', coalesce((
-      select jsonb_agg(
-        jsonb_build_object(
-          'hora', hora, 'leads', leads,
-          'p50_resposta_ia_s', p50_resposta_ia_s,
-          'p50_resposta_humano_s', p50_resposta_humano_s,
-          'sem_resposta', sem_resposta
-        ) order by hora
-      ) from por_hora
-    ), '[]'::jsonb)
-  );
-$$;
-
-revoke all on function public.fn_leads_por_horario(uuid, timestamptz, timestamptz) from public, anon;
-grant execute on function public.fn_leads_por_horario(uuid, timestamptz, timestamptz) to authenticated, service_role;
 drop policy if exists crm_proposals_write on public.crm_proposals;
 drop policy if exists crm_proposals_insert on public.crm_proposals;
 create policy crm_proposals_insert on public.crm_proposals

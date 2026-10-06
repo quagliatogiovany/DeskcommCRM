@@ -21,6 +21,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { autorizaCron } from "@/lib/auth/cron-auth";
 import { logger } from "@/lib/logger";
+import { idsDeOrgsParadas } from "@/lib/organizacao/operante";
 import { abrirRodada } from "@/lib/recuperacao/abrir-rodada";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -62,6 +63,7 @@ async function handle(req: NextRequest): Promise<Response> {
     return ok({ organizacoes: 0, disparadas: 0, puladas: {} }, { requestId });
   }
 
+  const paradas = new Set(await idsDeOrgsParadas(admin));
   const orgIds = [...new Set(configs.map((c) => c.organization_id as string))];
   const { data: organizacoes } = await admin
     .from("organizations")
@@ -79,6 +81,10 @@ async function handle(req: NextRequest): Promise<Response> {
 
   for (const config of configs) {
     const org = config.organization_id as string;
+    if (paradas.has(org)) {
+      pular("org_parada");
+      continue;
+    }
     const fuso = fusoPorOrg.get(org) ?? FUSO_PADRAO;
 
     let parede: ReturnType<typeof partesNoFuso>;

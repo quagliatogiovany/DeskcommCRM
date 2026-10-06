@@ -38,6 +38,7 @@ import { followupGatilhoLeadHandler } from "@/lib/followup/gatilho-lead.handler"
 import { followupGatilhoPresencaHandler } from "@/lib/followup/gatilho-presenca.handler";
 import { followupGatilhoRetornoHandler } from "@/lib/followup/gatilho-retorno.handler";
 import { followupReactivityHandler } from "@/lib/followup/reactivity.handler";
+import { avisoAoNodusHandler } from "@/lib/escalacao/aviso-ao-nodus.handler";
 import { avisoDeEtapaHandler } from "@/lib/leads/aviso-de-etapa.handler";
 import { webPushInboundHandler } from "@/lib/notifications/push.handler";
 import { avisoDePropostaNoWhatsAppHandler } from "@/lib/propostas/aviso-no-whatsapp.handler";
@@ -74,6 +75,7 @@ const PULA: EventHandler[] = [
   followupGatilhoPresencaHandler,
   webPushInboundHandler,
   avisoDeCasoAoSuporteHandler,
+  avisoAoNodusHandler,
   avisoDePropostaNoWhatsAppHandler,
   conversaoDeVendaHandler,
   conversaoDeQualificacaoHandler,

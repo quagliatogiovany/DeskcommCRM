@@ -1,7 +1,7 @@
 /**
  * A CONFIGURAÇÃO DE RECUPERAÇÃO ESTÁ NOS TRÊS ARTEFATOS, E QUEM ESCREVE
  * CAMPANHA DE RECUPERAÇÃO É SÓ `lib/recuperacao/abrir-rodada.ts` (migration
- * 0417).
+ * 0559).
  *
  * Doutrina de migrations do repo: toda mudança de schema sai em migration
  * versionada + apêndice idempotente do `baseline.sql` + linha no MANIFEST, e
@@ -94,7 +94,7 @@ const TABELA_BASELINE = normalizado(
 );
 
 const apendice = baseline.indexOf(
-  "-- ---- recuperação de clientes inativos: config por organização (migration 0417) ----",
+  "-- ---- recuperação de clientes inativos: config por organização (migration 0559) ----",
 );
 const varredura = baseline.indexOf(
   "-- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----",
@@ -115,10 +115,10 @@ const CHECKS_RECUPERACAO_CONFIG = [
   "recuperacao_config_ativo_exige_canal",
 ] as const;
 
-describe("recuperação de clientes inativos (0417)", () => {
+describe("recuperação de clientes inativos (0559)", () => {
   it("a tripla existe: migration versionada, apêndice no baseline e linha no MANIFEST", () => {
     expect(existsSync(join(process.cwd(), MIGRACAO))).toBe(true);
-    expect(apendice, "apêndice da 0417 ausente do baseline.sql").toBeGreaterThan(-1);
+    expect(apendice, "apêndice da 0559 ausente do baseline.sql").toBeGreaterThan(-1);
     expect(manifest).toMatch(/\| `20260929200000` \| `0559_recuperacao_de_clientes` \|/);
   });
 

@@ -33,6 +33,7 @@ const CHAMADORES: Record<string, string> = {
   "lib/automation/actions/send-ai-message.ts": "o desfecho vira failed na execução da regra; registro do instante, sem retentativa",
   "lib/automation/actions/send-whatsapp.ts": "o desfecho vira failed na execução da regra; registro do instante, sem retentativa",
   "lib/campanhas/acoes.ts": "ação disparada da tela: o erro sobe para quem clicou, sem estado gravado",
+  "lib/channels/pos-entrada.ts": "triagem Jev best-effort: o catch devolve false e o agente segue normal; nada gravado, sem retentativa",
   "lib/mcp/tools/messages.ts": "ferramenta MCP: o erro sobe ao cliente; o token da org parada já é recusado antes",
   "lib/mcp/tools/start-conversation.ts": "ferramenta MCP: o erro sobe ao cliente; o token da org parada já é recusado antes",
 };
