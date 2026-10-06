@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { DicaDeVariantes } from "@/components/campanhas/DicaDeVariantes";
 import { Textarea } from "@/components/ui/textarea";
 import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
 import { useT } from "@/hooks/i18n/useT";
@@ -142,6 +143,7 @@ function FormularioDeRecuperacao({ inicial }: { inicial: RecuperacaoConfig }) {
           onChange={(e) => atualizar("mensagem", e.target.value)}
           placeholder={t("Sentimos sua falta, {{primeiro_nome}}! Já faz {{dias_sem_pedir}} dias...")}
         />
+        <DicaDeVariantes onUsarExemplo={(texto) => atualizar("mensagem", texto)} />
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           {VARIAVEIS_DA_CAMPANHA.map((v) => (
             <span key={v} title={DESCRICAO_DA_VARIAVEL[v]} className="rounded-md bg-muted px-2 py-0.5">
