@@ -16,7 +16,7 @@
  * operador precisa ver antes de apertar é "quantas pessoas isto pega".
  */
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCriarCampanha, usePreviaDaAudiencia } from "@/hooks/campanhas/useCampanhas";
 import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
-import { EditorDeVariantes } from "@/components/campanhas/EditorDeVariantes";
+import { EditorDeVariantes, type EditorDeVariantesHandle } from "@/components/campanhas/EditorDeVariantes";
 import { useT } from "@/hooks/i18n/useT";
 import {
   useAgentesPublicados,
@@ -35,6 +35,7 @@ import { VARIAVEIS_DA_CAMPANHA, DESCRICAO_DA_VARIAVEL } from "@/lib/campanhas/re
 
 export function NovaCampanha() {
   const t = useT();
+  const editorRef = useRef<EditorDeVariantesHandle>(null);
   const router = useRouter();
   const canais = useChannelSessions();
   const criar = useCriarCampanha();
@@ -345,6 +346,7 @@ export function NovaCampanha() {
       <Card className="space-y-4 p-4">
         <h2 className="font-medium">{t("Mensagem")}</h2>
         <EditorDeVariantes
+          ref={editorRef}
           rows={6}
           value={texto}
           onChange={setTexto}
@@ -359,7 +361,7 @@ export function NovaCampanha() {
                 <button
                   type="button"
                   className="rounded-md bg-surface-elevated px-1 font-mono text-xs"
-                  onClick={() => setTexto((atual) => `${atual}{{${v}}}`)}
+                  onClick={() => editorRef.current?.inserir(`{{${v}}}`)}
                 >
                   {`{{${v}}}`}
                 </button>{" "}

@@ -18,7 +18,7 @@
  * ele se edita na própria tela de detalhe, com a campanha em pé.
  */
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -28,13 +28,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useCampanha, useEditarCampanha, usePreviaDaAudiencia } from "@/hooks/campanhas/useCampanhas";
 import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
-import { EditorDeVariantes } from "@/components/campanhas/EditorDeVariantes";
+import { EditorDeVariantes, type EditorDeVariantesHandle } from "@/components/campanhas/EditorDeVariantes";
 import { useT } from "@/hooks/i18n/useT";
 import { useAgentesPublicados, useEtapas, useFunis } from "@/hooks/campanhas/useDestinoDaCampanha";
 import { DESCRICAO_DA_VARIAVEL, VARIAVEIS_DA_CAMPANHA } from "@/lib/campanhas/renderizador";
 
 export function EditarCampanha({ id }: { id: string }) {
   const t = useT();
+  const editorRef = useRef<EditorDeVariantesHandle>(null);
   const router = useRouter();
   const campanha = useCampanha(id);
   const canais = useChannelSessions();
@@ -328,6 +329,7 @@ export function EditarCampanha({ id }: { id: string }) {
       <Card className="space-y-4 p-4">
         <h2 className="font-medium">{t("Mensagem")}</h2>
         <EditorDeVariantes
+          ref={editorRef}
           rows={6}
           value={texto}
           onChange={setTexto}
@@ -339,7 +341,7 @@ export function EditarCampanha({ id }: { id: string }) {
               <button
                 type="button"
                 className="rounded-md bg-surface-elevated px-1 font-mono text-xs"
-                onClick={() => setTexto((atual) => `${atual}{{${v}}}`)}
+                onClick={() => editorRef.current?.inserir(`{{${v}}}`)}
               >
                 {`{{${v}}}`}
               </button>{" "}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { camposUsadosNoTexto, dividirVariantes, escolherVariante, juntarVariantes, renderizar, saudacaoDaHora, variaveisUsadas } from "./renderizador";
+import { camposUsadosNoTexto, dividirVariantes, escolherVariante, inserirNoCursor, juntarVariantes, renderizar, saudacaoDaHora, variaveisUsadas } from "./renderizador";
 
 const FUSO = "America/Sao_Paulo";
 /** 15h em São Paulo (UTC-3). */
@@ -313,5 +313,29 @@ describe("dividirVariantes / juntarVariantes (editor de versões)", () => {
   it("ida e volta é estável com quebras de linha nas pontas", () => {
     const versoes = ["A\n", "\nB"];
     expect(dividirVariantes(juntarVariantes(versoes))).toEqual(versoes);
+  });
+});
+
+describe("inserirNoCursor (botão de variável)", () => {
+  it("escreve no meio, onde está o cursor, e devolve a nova posição", () => {
+    expect(inserirNoCursor("Oi , tudo bem?", 3, 3, "{{primeiro_nome}}")).toEqual({
+      texto: "Oi {{primeiro_nome}}, tudo bem?",
+      cursor: 3 + "{{primeiro_nome}}".length,
+    });
+  });
+
+  it("troca o trecho selecionado", () => {
+    expect(inserirNoCursor("Oi NOME!", 3, 7, "{{nome}}").texto).toBe("Oi {{nome}}!");
+  });
+
+  it("no começo e no fim", () => {
+    expect(inserirNoCursor("Oi", 0, 0, "{{saudacao}} ").texto).toBe("{{saudacao}} Oi");
+    expect(inserirNoCursor("Oi", 2, 2, "!").texto).toBe("Oi!");
+  });
+
+  it("posição fora do texto é aparada, nunca lança", () => {
+    expect(inserirNoCursor("Oi", 99, 120, "X").texto).toBe("OiX");
+    expect(inserirNoCursor("Oi", -5, -1, "X").texto).toBe("XOi");
+    expect(inserirNoCursor("", 0, 0, "X")).toEqual({ texto: "X", cursor: 1 });
   });
 });

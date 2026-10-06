@@ -321,3 +321,15 @@ export function escolherVariante(corpo: string, sorteio: () => number = Math.ran
   if (variantes.length <= 1) return corpo;
   return variantes[Math.floor(sorteio() * variantes.length)] ?? corpo;
 }
+
+/** Escreve `token` no lugar do cursor (ou no lugar do trecho selecionado). Posições fora do texto são aparadas. */
+export function inserirNoCursor(
+  texto: string,
+  inicio: number,
+  fim: number,
+  token: string,
+): { texto: string; cursor: number } {
+  const i = Math.max(0, Math.min(inicio, texto.length));
+  const f = Math.max(i, Math.min(fim, texto.length));
+  return { texto: texto.slice(0, i) + token + texto.slice(f), cursor: i + token.length };
+}
