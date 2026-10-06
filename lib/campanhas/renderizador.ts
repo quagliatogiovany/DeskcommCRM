@@ -299,13 +299,25 @@ export function saudacaoDaHora(agora: Date, fuso: string): string {
  */
 const LINHA_SEPARADORA = /^[ \t]*(?:[-—–_*][ \t]*){3,}$/;
 
-export function escolherVariante(corpo: string, sorteio: () => number = Math.random): string {
+/** O texto que a pessoa tem nas mãos (a que o editor de versões mostra): um bloco por versão, sem aparar. */
+export function dividirVariantes(corpo: string): string[] {
   const blocos: string[][] = [[]];
   for (const linha of corpo.split(/\r?\n/)) {
     if (LINHA_SEPARADORA.test(linha)) blocos.push([]);
     else blocos[blocos.length - 1]!.push(linha);
   }
-  const variantes = blocos.map((b) => b.join("\n").trim()).filter((v) => v !== "");
+  return blocos.map((b) => b.join("\n"));
+}
+
+/** O inverso: é como as versões ficam guardadas na campanha (`message_body`). */
+export function juntarVariantes(versoes: readonly string[]): string {
+  return versoes.join("\n---\n");
+}
+
+export function escolherVariante(corpo: string, sorteio: () => number = Math.random): string {
+  const variantes = dividirVariantes(corpo)
+    .map((v) => v.trim())
+    .filter((v) => v !== "");
   if (variantes.length <= 1) return corpo;
   return variantes[Math.floor(sorteio() * variantes.length)] ?? corpo;
 }

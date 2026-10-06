@@ -19,8 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { DicaDeVariantes } from "@/components/campanhas/DicaDeVariantes";
-import { Textarea } from "@/components/ui/textarea";
+import { EditorDeVariantes } from "@/components/campanhas/EditorDeVariantes";
 import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
 import { useT } from "@/hooks/i18n/useT";
 import {
@@ -137,13 +136,13 @@ function FormularioDeRecuperacao({ inicial }: { inicial: RecuperacaoConfig }) {
 
       <Card className="flex flex-col gap-4 p-4">
         <h2 className="text-sm font-medium">{t("Mensagem")}</h2>
-        <Textarea
+        <EditorDeVariantes
           rows={5}
           value={estado.mensagem}
-          onChange={(e) => atualizar("mensagem", e.target.value)}
+          onChange={(texto) => atualizar("mensagem", texto)}
           placeholder={t("Sentimos sua falta, {{primeiro_nome}}! Já faz {{dias_sem_pedir}} dias...")}
+          ariaLabel={t("Texto da mensagem")}
         />
-        <DicaDeVariantes onUsarExemplo={(texto) => atualizar("mensagem", texto)} />
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           {VARIAVEIS_DA_CAMPANHA.map((v) => (
             <span key={v} title={DESCRICAO_DA_VARIAVEL[v]} className="rounded-md bg-muted px-2 py-0.5">

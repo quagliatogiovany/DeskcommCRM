@@ -28,7 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useCampanha, useEditarCampanha, usePreviaDaAudiencia } from "@/hooks/campanhas/useCampanhas";
 import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
-import { DicaDeVariantes } from "@/components/campanhas/DicaDeVariantes";
+import { EditorDeVariantes } from "@/components/campanhas/EditorDeVariantes";
 import { useT } from "@/hooks/i18n/useT";
 import { useAgentesPublicados, useEtapas, useFunis } from "@/hooks/campanhas/useDestinoDaCampanha";
 import { DESCRICAO_DA_VARIAVEL, VARIAVEIS_DA_CAMPANHA } from "@/lib/campanhas/renderizador";
@@ -327,13 +327,12 @@ export function EditarCampanha({ id }: { id: string }) {
 
       <Card className="space-y-4 p-4">
         <h2 className="font-medium">{t("Mensagem")}</h2>
-        <Textarea
+        <EditorDeVariantes
           rows={6}
           value={texto}
-          onChange={(e) => setTexto(e.target.value)}
-          aria-label={t("Texto da mensagem")}
+          onChange={setTexto}
+          ariaLabel={t("Texto da mensagem")}
         />
-        <DicaDeVariantes onUsarExemplo={setTexto} />
         <ul className="space-y-1 text-sm text-muted-foreground">
           {VARIAVEIS_DA_CAMPANHA.map((v) => (
             <li key={v}>

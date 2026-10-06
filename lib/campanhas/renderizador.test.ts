@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { camposUsadosNoTexto, escolherVariante, renderizar, saudacaoDaHora, variaveisUsadas } from "./renderizador";
+import { camposUsadosNoTexto, dividirVariantes, escolherVariante, juntarVariantes, renderizar, saudacaoDaHora, variaveisUsadas } from "./renderizador";
 
 const FUSO = "America/Sao_Paulo";
 /** 15h em São Paulo (UTC-3). */
@@ -284,5 +284,34 @@ describe("escolherVariante (variantes separadas por linha)", () => {
   it("separador sobrando no começo ou no fim não cria variante vazia: com uma só, o texto segue como veio", () => {
     const corpo = `---\n${A}\n---\n`;
     expect(escolherVariante(corpo, () => 0.99)).toBe(corpo);
+  });
+});
+
+describe("dividirVariantes / juntarVariantes (editor de versões)", () => {
+  it("o que o editor junta, o sorteio separa — e vice-versa", () => {
+    const versoes = ["Oi!\nSentimos sua falta.", "Olá, faz tempo.", "Ei! Que tal pedir?"];
+    const guardado = juntarVariantes(versoes);
+    expect(dividirVariantes(guardado)).toEqual(versoes);
+    expect(escolherVariante(guardado, () => 0)).toBe(versoes[0]);
+    expect(escolherVariante(guardado, () => 0.99)).toBe(versoes[2]);
+  });
+
+  it("versão vazia (acabou de clicar em 'outra versão') sobrevive ao ir e vir", () => {
+    expect(dividirVariantes(juntarVariantes(["Oi!", ""]))).toEqual(["Oi!", ""]);
+    expect(dividirVariantes(juntarVariantes(["", ""]))).toEqual(["", ""]);
+  });
+
+  it("uma versão só é o texto puro, sem separador", () => {
+    expect(juntarVariantes(["Oi!"])).toBe("Oi!");
+    expect(dividirVariantes("Oi!")).toEqual(["Oi!"]);
+  });
+
+  it("texto antigo com separador solto abre já dividido em campos", () => {
+    expect(dividirVariantes("A\n-----\nB\n***\nC")).toEqual(["A", "B", "C"]);
+  });
+
+  it("ida e volta é estável com quebras de linha nas pontas", () => {
+    const versoes = ["A\n", "\nB"];
+    expect(dividirVariantes(juntarVariantes(versoes))).toEqual(versoes);
   });
 });

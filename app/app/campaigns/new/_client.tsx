@@ -22,10 +22,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useCriarCampanha, usePreviaDaAudiencia } from "@/hooks/campanhas/useCampanhas";
 import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
-import { DicaDeVariantes } from "@/components/campanhas/DicaDeVariantes";
+import { EditorDeVariantes } from "@/components/campanhas/EditorDeVariantes";
 import { useT } from "@/hooks/i18n/useT";
 import {
   useAgentesPublicados,
@@ -345,14 +344,13 @@ export function NovaCampanha() {
 
       <Card className="space-y-4 p-4">
         <h2 className="font-medium">{t("Mensagem")}</h2>
-        <Textarea
+        <EditorDeVariantes
           rows={6}
           value={texto}
-          onChange={(e) => setTexto(e.target.value)}
+          onChange={setTexto}
           placeholder={t("Escreva como você falaria com uma pessoa só.")}
-          aria-label={t("Texto da mensagem")}
+          ariaLabel={t("Texto da mensagem")}
         />
-        <DicaDeVariantes onUsarExemplo={setTexto} />
         <div className="space-y-1 text-sm text-muted-foreground">
           <p>{t("Você pode usar:")}</p>
           <ul className="space-y-1">
