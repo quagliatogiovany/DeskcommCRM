@@ -53,8 +53,14 @@ describe("contactCreateSchema", () => {
   });
 
   it("rejects non-E.164 phones", () => {
-    const r = contactCreateSchema.safeParse({ phone_number: "11999998888" });
+    const r = contactCreateSchema.safeParse({ phone_number: "abc123" });
     expect(r.success).toBe(false);
+  });
+
+  // FORK: telefone com DDD e sem +55 é aceito (lib/schemas/contacts.ts normaliza para E.164).
+  it("accepts a Brazilian phone with DDD and no +55", () => {
+    const r = contactCreateSchema.safeParse({ phone_number: "11999998888" });
+    expect(r.success).toBe(true);
   });
 
   it("accepts E.164 phones", () => {
