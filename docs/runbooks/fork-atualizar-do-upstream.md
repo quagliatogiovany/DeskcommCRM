@@ -92,3 +92,16 @@ Tag da imagem = `deploy-nodus-sobre-upstream`.
 - `scripts/checar-colisao-de-migration.sh` mede contra a base do PR (`GITHUB_BASE_REF`); `main` do fork é linha velha.
 - `scripts/conferir-isolamento-do-kit.sh` pula em fork (sem releases/tags para comparar).
 - Env vazia no `.env.example` + `??` não cai no default: use `process.env.X?.trim() || "default"`.
+- **Schemas por país sobrescrevem o base.** `contactCreateSchemaDoPais` / `contactPatchSchemaDoPais` (tela, API e
+  importação de contatos) trocam o `phone_number` do schema base: a normalização do fork (DDD sem +55) precisa estar
+  em `telefoneDoPais`. Teste sempre o schema que a TELA usa, não só o base.
+- **O CI roda mais que o `tsc` simples:** `tsc -p tsconfig.typecheck.json` (precisa de `NODE_OPTIONS=--max-old-space-size=8192`)
+  e `eslint .` inteiro, testes incluídos. Regra `react-hooks/immutability`: teste de componente não pode escrever em
+  propriedade durante a renderização (use callback). Teste de componente: `// @vitest-environment jsdom`.
+- **Variantes de mensagem** (`escolherVariante`, `dividirVariantes`, `juntarVariantes`, `inserirNoCursor` em
+  `lib/campanhas/renderizador.ts`; editor em `components/campanhas/EditorDeVariantes.tsx`): o texto guardado é UM só, com
+  versões separadas por `---`. Se o upstream mexer em `rodada.ts`/`acoes.ts`/`preparacao.ts`, confira que o sorteio continua lá.
+- **Deploy na VPS: confirme por digest**, nunca por `CreatedSince`: `docker inspect <container> --format '{{.Image}}'` tem de ser
+  igual a `docker image inspect <imagem>:<tag> --format '{{.Id}}'`, e diferente do digest anterior. Confira também o `worker`
+  (é ele que executa as ferramentas do agente).
+- O deploy que só muda código (sem migration) dispensa `scp`, backup e baseline: `pull` das 3 imagens + `up -d --force-recreate`.
