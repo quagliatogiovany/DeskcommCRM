@@ -38927,12 +38927,12 @@ create policy recuperacao_config_select on public.recuperacao_config
 drop policy if exists recuperacao_config_write on public.recuperacao_config;
 create policy recuperacao_config_write on public.recuperacao_config
   using (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   )
   with check (
-    public.fn_is_platform_admin()
+    public.fn_is_platform_admin_full()
     or ((organization_id in (select public.fn_user_org_ids()))
         and public.fn_role_at_least(organization_id, 'manager'))
   );
