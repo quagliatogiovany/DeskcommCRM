@@ -31,15 +31,6 @@ import {
 } from "@/hooks/recuperacao/useRecuperacao";
 import { DESCRICAO_DA_VARIAVEL, VARIAVEIS_DA_CAMPANHA } from "@/lib/campanhas/renderizador";
 
-const DIAS_DA_SEMANA = [
-  "Domingo",
-  "Segunda",
-  "Terça",
-  "Quarta",
-  "Quinta",
-  "Sexta",
-  "Sábado",
-];
 
 const HORAS = Array.from({ length: 24 }, (_, h) => h);
 
@@ -153,7 +144,7 @@ function FormularioDeRecuperacao({ inicial }: { inicial: RecuperacaoConfig }) {
         />
         <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
           {VARIAVEIS_DA_CAMPANHA.map((v) => (
-            <span key={v} title={DESCRICAO_DA_VARIAVEL[v]} className="rounded bg-muted px-2 py-0.5">
+            <span key={v} title={DESCRICAO_DA_VARIAVEL[v]} className="rounded-md bg-muted px-2 py-0.5">
               {`{{${v}}}`}
             </span>
           ))}
@@ -208,9 +199,9 @@ function FormularioDeRecuperacao({ inicial }: { inicial: RecuperacaoConfig }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {DIAS_DA_SEMANA.map((nome, i) => (
+                  {[t("Domingo"), t("Segunda"), t("Terça"), t("Quarta"), t("Quinta"), t("Sexta"), t("Sábado")].map((nome, i) => (
                     <SelectItem key={i} value={String(i)}>
-                      {t(nome)}
+                      {nome}
                     </SelectItem>
                   ))}
                 </SelectContent>

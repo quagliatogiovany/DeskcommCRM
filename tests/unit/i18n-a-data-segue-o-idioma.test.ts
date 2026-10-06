@@ -63,6 +63,8 @@ const A_CAMADA_DE_DATA = new Set([
  * Exceções, cada uma com o motivo. SÓ ENCOLHE.
  */
 const FORA_DE_INTERFACE: Record<string, string> = {
+  "lib/recuperacao/abrir-rodada.ts":
+    "monta o trecho do último pedido que vai DENTRO da mensagem ao cliente final da loja (brasileiro, via WhatsApp) — é conteúdo da campanha, não interface; o idioma do operador não se aplica",
   "app/api/v1/admin/dashboard/kpis/route.ts":
     "monta o texto do aviso no momento em que ele nasce — é conteúdo gravado, não interface",
 

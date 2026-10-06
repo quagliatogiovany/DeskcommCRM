@@ -93,14 +93,11 @@ const TOOLS_DO_SEED = [
   // Quatro são a família de agenda, que é o assunto do defeito que subiu o teto
   // pela primeira vez; as quatro últimas são leitura pura de outros pacotes,
   // para a aritmética continuar estourando a cada subida.
+  // ⚠️ Fork Nodus: o pacote "Atender" ganhou 6 ferramentas `nodus_*` (24 no total), então a conta
+  // vigente é 5 do seed + 23 marcáveis = 28 > 27 (excedente 1). Dos oito fillers sobraram os dois
+  // abaixo; o guarda unitário `teto-do-atender-bate-com-a-recusa-da-spec` mede a conta.
   "crm_find_free_slots",
   "crm_list_appointments",
-  "crm_book_appointment",
-  "crm_reschedule_appointment",
-  "crm_list_pipelines",
-  "crm_list_event_types",
-  "crm_list_human_cases",
-  "crm_list_knowledge_sources",
 ];
 
 /**

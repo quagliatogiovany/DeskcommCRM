@@ -35,6 +35,8 @@ const NAV_ALLOWLIST: Record<string, string> = {
   "/app/ai/agents/new":
     "sub-fluxo de criar agente, alcançado pelo botão dentro da lista de Agentes",
   "/app/team/invite": "sub-fluxo de convite, alcançado de dentro de Equipe",
+  "/app/campaigns/recuperacao":
+    "sub-fluxo de recuperação de clientes inativos, alcançado pelo link \"Recuperação\" dentro da lista de Campanhas",
   "/app/campaigns/new":
     "sub-fluxo de criar campanha, alcançado pelo botão dentro da lista de Campanhas",
   "/app/campaigns/settings":

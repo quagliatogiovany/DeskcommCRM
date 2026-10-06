@@ -233,6 +233,28 @@ const MARCA_CONGELADA: Record<string, EntradaDeMarca> = {
       "nome do servidor MCP, que o cliente (Claude Desktop e afins) grava na própria configuração. Renomear derruba as conexões já configuradas de quem usa",
     marcas: ["deskcomm-crm"],
   },
+  "lib/channels/pos-entrada.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "caminho `api/integrations/deskcomm/*` do Nodus (triagem Jev: pedidos e catálogo). É rota do OUTRO sistema, que casa o caminho por igualdade; renomear aqui derruba a resposta automática de status/estoque sem erro visível",
+    marcas: ["deskcomm", "deskcomm"],
+  },
+  "lib/mcp/tools/nodus.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "caminhos `api/integrations/deskcomm/*` do Nodus nas ferramentas `nodus_*` (catálogo, pedidos, cancelamento, promoções). Contrato de fio com o Nodus, que serve a rota com esse nome exato",
+    marcas: ["deskcomm", "deskcomm", "deskcomm", "deskcomm", "deskcomm", "deskcomm", "deskcomm"],
+  },
+  "lib/nodus/ficha-cliente.ts": {
+    categoria: "PROTOCOLO",
+    motivo: "caminho `api/integrations/deskcomm/clientes/ficha` do Nodus (card do cliente no inbox). Rota alheia, casada por igualdade",
+    marcas: ["deskcomm"],
+  },
+  "lib/recuperacao/buscar-inativos.ts": {
+    categoria: "PROTOCOLO",
+    motivo: "caminho `api/integrations/deskcomm/clientes-inativos` do Nodus (recuperação de clientes). Rota alheia, casada por igualdade",
+    marcas: ["deskcomm"],
+  },
   "lib/supabase/admin.ts": {
     categoria: "PROTOCOLO",
     motivo:
