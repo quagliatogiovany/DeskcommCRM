@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { camposUsadosNoTexto, renderizar, saudacaoDaHora, variaveisUsadas } from "./renderizador";
+import { camposUsadosNoTexto, escolherVariante, renderizar, saudacaoDaHora, variaveisUsadas } from "./renderizador";
 
 const FUSO = "America/Sao_Paulo";
 /** 15h em São Paulo (UTC-3). */
@@ -232,5 +232,57 @@ describe("o valor do cadastro sai LITERAL, mesmo com o corpo renderizado duas ve
   it("no envio de teste (uma passada só, com instante) o valor também sai literal", () => {
     const r = renderizar("{{lead.gancho}}", { nome: null, lead: { gancho: VALOR } }, { agora: TARDE, fuso: FUSO });
     expect(r.texto).toBe(VALOR);
+  });
+});
+
+describe("escolherVariante (variantes separadas por linha)", () => {
+  const A = "Oi, tudo bem?\nSentimos sua falta!";
+  const B = "Olá! Faz tempo que você não pede.";
+  const C = "Ei! Que tal pedir hoje?";
+  // sorteio fixo: 0 → 1ª, 0.5 → 2ª, 0.99 → 3ª
+  const escolhas = (corpo: string) => [0, 0.5, 0.99].map((n) => escolherVariante(corpo, () => n));
+
+  it.each([
+    ["---", `${A}\n---\n${B}\n---\n${C}`],
+    ["--- com espaços nas pontas", `${A}\n --- \n${B}\n--- \n${C}`],
+    ["linhas em branco em volta", `${A}\n\n---\n\n${B}\n\n---\n\n${C}`],
+    ["mais de 3 traços", `${A}\n-----\n${B}\n----------\n${C}`],
+    ["travessões", `${A}\n———\n${B}\n———\n${C}`],
+    ["asteriscos", `${A}\n***\n${B}\n***\n${C}`],
+    ["traços separados por espaço", `${A}\n- - -\n${B}\n- - -\n${C}`],
+  ])("separador %s: sorteia UMA variante por envio, nunca o texto inteiro", (_nome, corpo) => {
+    const [x, y, z] = escolhas(corpo);
+    expect(x).toBe(A.replace(/\n/g, x!.includes("\r") ? "\r\n" : "\n"));
+    expect(y).toBe(B);
+    expect(z).toBe(C);
+    for (const v of [x, y, z]) expect(v).not.toMatch(/(^|\n)\s*(---|-----|———|\*\*\*)/);
+  });
+
+  it("variante com várias linhas continua inteira", () => {
+    expect(escolherVariante(`${A}\n---\n${B}`, () => 0)).toBe(A);
+  });
+
+  it("sem separador devolve o texto como veio", () => {
+    expect(escolherVariante(A)).toBe(A);
+  });
+
+  it("'---' na MESMA linha do texto não é separador", () => {
+    const corpo = "Oi! --- Olá --- Ei";
+    expect(escolherVariante(corpo)).toBe(corpo);
+  });
+
+  it("hífen no meio do texto e linha curta de dois traços não separam", () => {
+    const corpo = "Pedido de R$ 80 - grátis a entrega\n--\nOutra linha";
+    expect(escolherVariante(corpo)).toBe(corpo);
+  });
+
+  it("CRLF (texto vindo do Windows) separa do mesmo jeito", () => {
+    const corpo = `${A}\r\n---\r\n${B}`.replace(/(?<!\r)\n/g, "\r\n");
+    expect(escolherVariante(corpo, () => 0.99)).toBe(B);
+  });
+
+  it("separador sobrando no começo ou no fim não cria variante vazia: com uma só, o texto segue como veio", () => {
+    const corpo = `---\n${A}\n---\n`;
+    expect(escolherVariante(corpo, () => 0.99)).toBe(corpo);
   });
 });

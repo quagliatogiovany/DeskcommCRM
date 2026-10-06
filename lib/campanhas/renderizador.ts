@@ -290,12 +290,22 @@ export function saudacaoDaHora(agora: Date, fuso: string): string {
  * padrão que o WhatsApp mais penaliza. Escolhido no envio (como a saudação), não
  * na preparação: o snapshot guarda o corpo inteiro e o rodízio fica por conta de
  * quem despacha.
+ *
+ * ⚠️ FORK: o separador é TOLERANTE. Quem digita `-----`, `———` (travessão) ou `***` numa linha
+ * sozinha quer o mesmo que `---`; recusar em silêncio fazia o texto INTEIRO, com as três opções,
+ * sair para o cliente. Reconhece uma linha formada só por 3+ de `-`, `—`, `–`, `_` ou `*`
+ * (espaços nas pontas e entre os caracteres são ignorados). Tudo na mesma linha do texto
+ * ("Oi --- Olá") NÃO é separador: pode ser parte da mensagem.
  */
+const LINHA_SEPARADORA = /^[ \t]*(?:[-—–_*][ \t]*){3,}$/;
+
 export function escolherVariante(corpo: string, sorteio: () => number = Math.random): string {
-  const variantes = corpo
-    .split(/\r?\n[ \t]*---[ \t]*\r?\n/)
-    .map((v) => v.trim())
-    .filter((v) => v !== "");
+  const blocos: string[][] = [[]];
+  for (const linha of corpo.split(/\r?\n/)) {
+    if (LINHA_SEPARADORA.test(linha)) blocos.push([]);
+    else blocos[blocos.length - 1]!.push(linha);
+  }
+  const variantes = blocos.map((b) => b.join("\n").trim()).filter((v) => v !== "");
   if (variantes.length <= 1) return corpo;
   return variantes[Math.floor(sorteio() * variantes.length)] ?? corpo;
 }
