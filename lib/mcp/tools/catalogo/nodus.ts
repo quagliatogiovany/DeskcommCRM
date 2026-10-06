@@ -1,6 +1,15 @@
 /**
  * Capacidades da PONTE COM O NODUS — o sistema de delivery por trás da loja
  * (pedido, estoque, motoboy). Ver `lib/mcp/tools/nodus.ts` pros handlers.
+ *
+ * ⚠️ FORK, NÃO UPSTREAM. Estas 6 ferramentas `nodus_*` são do fork
+ * `quagliatogiovany/DeskcommCRM` e moram no pacote "atender" de propósito: quem liga
+ * o Atender precisa consultar pedido/estoque da loja. Elas contam no teto
+ * (`TETO_TOOLS_POR_AGENTE`) e por isso o seed do e2e
+ * (`tests/e2e/capacidades-do-agente.spec.ts`) tem 5 entradas, não as 11 do upstream — o guarda
+ * `teto-do-atender-bate-com-a-recusa-da-spec` mede a conta. Ao mergear o upstream, confira
+ * esse arquivo e o guarda. Se o Atender voltar a estourar, o caminho é um pacote próprio
+ * "Loja (Nodus)", não subir o teto.
  */
 import { declararTools } from "./tipos";
 
