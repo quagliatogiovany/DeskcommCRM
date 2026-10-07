@@ -56,6 +56,7 @@ import { casarClickRef } from "@/lib/plataformas-de-anuncio/meta/captura-de-cliq
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { ehPedidoDeOptOut } from "@/lib/opt-out/deteccao";
 import { ehContatoDoNumeroInterno } from "@/lib/escalacao/numero-interno-de-aviso";
+import { confirmarPixDoDono } from "./pix-do-dono";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { origemDoNegocioPeloCanal } from "@/lib/channels/origem-do-negocio";
 import { autorizarContatoParaIA } from "@/lib/ai/elegibilidade/autorizacao";
@@ -159,6 +160,10 @@ export async function aplicarEfeitosPosEntrada(
     });
     return;
   }
+
+  // FORK: o dono libera um Pix parado respondendo "OK <código>". Determinístico, sem agente; o Nodus só aceita o número de
+  // avisos da loja, então o "ok" de qualquer cliente cai fora e segue o caminho normal abaixo.
+  if (await confirmarPixDoDono(admin, entrada)) return;
 
   await aplicarOptOut(admin, entrada);
   await guardarOrigemDaPagina(admin, entrada);

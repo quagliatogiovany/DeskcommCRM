@@ -233,6 +233,17 @@ const MARCA_CONGELADA: Record<string, EntradaDeMarca> = {
       "nome do servidor MCP, que o cliente (Claude Desktop e afins) grava na própria configuração. Renomear derruba as conexões já configuradas de quem usa",
     marcas: ["deskcomm-crm"],
   },
+  "lib/channels/pix-do-dono.ts": {
+    categoria: "PROTOCOLO",
+    motivo:
+      "caminho `api/integrations/deskcomm/pedidos/confirmar-pix` do Nodus (o dono libera um Pix respondendo OK). Rota do OUTRO sistema, casada por igualdade; renomear aqui faz a confirmação pelo WhatsApp parar sem erro visível",
+    marcas: ["deskcomm"],
+  },
+  "lib/channels/pix-do-dono.test.ts": {
+    categoria: "PROTOCOLO",
+    motivo: "é a guarda do contrato acima: confere o caminho exato que o CRM chama no Nodus",
+    marcas: ["deskcomm"],
+  },
   "lib/channels/pos-entrada.ts": {
     categoria: "PROTOCOLO",
     motivo:
