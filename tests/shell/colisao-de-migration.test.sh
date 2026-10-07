@@ -50,6 +50,12 @@
 #  30. mais de 30 PRs abertos: o gate pede --limit, senão o gh corta calado em 30.
 set -uo pipefail
 
+# FORK: a suíte é HERMÉTICA. No CI de um PR o GitHub define GITHUB_REF (refs/pull/N/merge) e GITHUB_BASE_REF, e o
+# script sob prova os lê para excluir "o meu PR" e escolher a base. Os cenários aqui usam um PR de mentira com número
+# fixo (#7): num PR real de mesmo número o script o descartava como "o meu" e 9 casos reprovavam (aconteceu no PR #7
+# do fork). Cada caso monta o próprio mundo, então nada do ambiente do CI pode entrar.
+unset GITHUB_REF GITHUB_BASE_REF GITHUB_HEAD_REF
+
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE_ORIGEM="$RAIZ/scripts/checar-colisao-de-migration.sh"
 
