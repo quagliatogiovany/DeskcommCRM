@@ -307,11 +307,60 @@ export function mapHeader(
       }
     }
   });
+  // FORK: a planilha é feita por humano — "Número", "Tel", "Phone", "Telefone Celular" são o telefone, e
+  // "Nome Completo" é o nome. Só vale para coluna que nenhum apelido exato reconheceu (o exato sempre ganha).
+  header.forEach((rawCell, idx) => {
+    if (Object.values(indices).includes(idx)) return;
+    const cell = normalizaHeader(rawCell);
+    if (indices.phone_number === undefined && TELEFONE_PELO_NOME.test(cell)) indices.phone_number = idx;
+    else if (indices.name === undefined && NOME_PELO_NOME.test(cell)) indices.name = idx;
+  });
   const temIdentificador = indices.phone_number !== undefined || indices.email !== undefined;
   return {
     indices,
     motivo: temIdentificador ? null : _t("cabeçalho sem coluna de telefone nem e-mail"),
   };
+}
+
+/** Palavras que, no meio do nome da coluna, a identificam como telefone (já sem acento, caixa e separador). */
+const TELEFONE_PELO_NOME = /(^|_)(tel|telefone|fone|cel|celular|whats|whatsapp|zap|numero|phone|telefono|movil)(_|$)|telefone|celular|whatsapp|phone/;
+/** Idem para o nome da pessoa. */
+const NOME_PELO_NOME = /(^|_)(nome|nombre|name|cliente)(_|$)/;
+
+/**
+ * Arquivo SEM linha de cabeçalho — direto "Maria,48999990000". Sem isto a primeira pessoa era lida como
+ * cabeçalho e a importação recusava o arquivo inteiro. Só vale quando o cabeçalho real NÃO tem telefone nem
+ * e-mail e a primeira linha tem uma célula com cara de telefone; nesse caso as colunas saem pela posição:
+ * a célula que parece telefone é o telefone, e a primeira outra célula com texto é o nome.
+ */
+export function inferirSemCabecalho(primeiraLinha: string[]): { indices: Record<string, number> } | null {
+  const telefone = primeiraLinha.findIndex(pareceTelefone);
+  if (telefone === -1) return null;
+  const indices: Record<string, number> = { phone_number: telefone };
+  const nome = primeiraLinha.findIndex((c, i) => i !== telefone && c.trim() !== "" && !pareceTelefone(c));
+  if (nome !== -1) indices.name = nome;
+  return { indices };
+}
+
+/** 8+ dígitos e quase nada além de dígitos e pontuação de telefone — "Rua 12, 345" não passa. */
+function pareceTelefone(cell: string): boolean {
+  const t = cell.trim();
+  const digitos = t.replace(/\D/g, "");
+  if (digitos.length < 8 || digitos.length > 15) return false;
+  return /^[+()\d\s.-]+$/.test(t);
+}
+
+/**
+ * A dica que acompanha o erro de cabeçalho: quais colunas o arquivo trouxe e o que usar no lugar. Fica FORA de
+ * `mapHeader` de propósito — o `motivo` dele é um contrato com testes e com a rota.
+ */
+export function dicaDeCabecalho(header: string[], t?: (text: string) => string): string {
+  const _t = t || ((x) => x);
+  const colunas = header.map((c) => c.trim()).filter(Boolean);
+  if (colunas.length === 0) return "";
+  return `${_t("Colunas encontradas:")} ${colunas.join(", ")}. ${_t(
+    'Na primeira linha use "nome" e "telefone" (ou "celular", "whatsapp"), ou envie só nome e telefone sem cabeçalho',
+  )}`;
 }
 
 // ---------------------------------------------------------------------------

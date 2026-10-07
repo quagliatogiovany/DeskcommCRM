@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   CSV_MAX_DATA_ROWS,
   CSV_MAX_BYTES,
+  dicaDeCabecalho,
+  inferirSemCabecalho,
   mapHeader,
   mapLinha,
   normalizaData,
@@ -368,5 +370,64 @@ describe("normalizaData recusa data com forma certa e dia inexistente", () => {
   it("29/02 em ano BISSEXTO continua valendo — a guarda não pode ser larga demais", () => {
     expect(normalizaData("29/02/2024")).toBe("2024-02-29");
     expect(normalizaData("29/02/2023")).toBeNull();
+  });
+});
+
+describe("planilha só com nome e telefone (fork)", () => {
+  const achou = (header: string[]) => mapHeader(header).indices;
+
+  it.each([
+    ["Nome", "Telefone"],
+    ["Nome Completo", "Telefone Celular"],
+    ["Cliente", "Número"],
+    ["nome", "tel"],
+    ["Name", "Phone"],
+    ["NOME", "WhatsApp"],
+    ["Nome do cliente", "Celular/WhatsApp"],
+    ["Nombre", "Teléfono"],
+  ])("cabeçalho %s + %s reconhece telefone e nome", (nome, telefone) => {
+    const i = achou([nome, telefone]);
+    expect(i.phone_number).toBe(1);
+    expect(i.name).toBe(0);
+    expect(mapHeader([nome, telefone]).motivo).toBeNull();
+  });
+
+  it("apelido exato continua ganhando do palpite", () => {
+    // "celular" é apelido exato do telefone; "tel_fixo" só casaria pelo palpite e fica de fora
+    const i = achou(["nome", "tel_fixo", "celular"]);
+    expect(i.phone_number).toBe(2);
+  });
+
+  it("coluna que não é telefone não vira telefone", () => {
+    expect(mapHeader(["Nome", "Hotel", "Cidade"]).motivo).not.toBeNull();
+    expect(mapHeader(["Nome", "Endereço"]).motivo).not.toBeNull();
+  });
+
+  it("a dica do erro lista as colunas encontradas e diz o que usar", () => {
+    const dica = dicaDeCabecalho(["Nome", "Cidade"]);
+    expect(dica).toContain("Colunas encontradas: Nome, Cidade");
+    expect(dica).toContain("telefone");
+    expect(dicaDeCabecalho(["", " "])).toBe("");
+  });
+
+  it("arquivo SEM cabeçalho: primeira linha com telefone vira nome + telefone pela posição", () => {
+    expect(inferirSemCabecalho(["Maria Silva", "48999990000"])?.indices).toEqual({ phone_number: 1, name: 0 });
+    expect(inferirSemCabecalho(["48999990000", "Maria Silva"])?.indices).toEqual({ phone_number: 0, name: 1 });
+    expect(inferirSemCabecalho(["(48) 99999-0000", "João"])?.indices).toEqual({ phone_number: 0, name: 1 });
+    expect(inferirSemCabecalho(["+5548999990000"])?.indices).toEqual({ phone_number: 0 });
+  });
+
+  it("sem cabeçalho de verdade (só texto) não inventa telefone", () => {
+    expect(inferirSemCabecalho(["Nome", "Cidade"])).toBeNull();
+    expect(inferirSemCabecalho(["Rua 12, 345", "Centro"])).toBeNull();
+    expect(inferirSemCabecalho(["123", "456"])).toBeNull();
+  });
+
+  it("ponta a ponta: arquivo sem cabeçalho vira contatos com nome e telefone", () => {
+    const rows = parseCsv("Maria Silva,48999990000\nJoão,(48) 98888-1111\n");
+    const semCab = inferirSemCabecalho(rows[0]!)!;
+    const contatos = rows.map((r) => mapLinha(r, semCab.indices).contato);
+    expect(contatos.map((c) => c.name)).toEqual(["Maria Silva", "João"]);
+    expect(contatos.map((c) => c.phone_number)).toEqual(["+5548999990000", "+5548988881111"]);
   });
 });

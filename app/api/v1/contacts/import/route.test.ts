@@ -245,6 +245,44 @@ describe("POST /api/v1/contacts/import — a planilha segue o PAÍS da organiza�
     }));
     return { status: resposta.status, corpo: await resposta.json() as { data?: Resumo } };
   }
+  // FORK: planilha só com nome e telefone — com outro nome de coluna, ou sem linha de cabeçalho nenhuma.
+  it("arquivo só com nome e telefone, SEM linha de cabeçalho: importa todas as pessoas", async () => {
+    const db = banco();
+    // a "primeira linha" do helper é a de Maria: aqui ela é dado, não cabeçalho
+    const { status, corpo } = await importarCom("Maria Silva,48999990000", ["João,(48) 98888-1111"]);
+
+    expect(status).toBe(200);
+    expect(corpo.data).toEqual({ total_linhas: 2, imported: 2, skipped_duplicates: 0, errors: [] });
+    expect(db.tentativas.map((t) => t.phone_number)).toEqual(["+5548999990000", "+5548988881111"]);
+    expect(db.tentativas.map((t) => t.name)).toEqual(["Maria Silva", "João"]);
+  });
+
+  it("arquivo sem cabeçalho com UMA pessoa só também importa", async () => {
+    banco();
+    const { status, corpo } = await importarCom("Maria Silva,48999990000", []);
+    expect(status).toBe(200);
+    expect(corpo.data).toMatchObject({ total_linhas: 1, imported: 1 });
+  });
+
+  it("cabeçalho com outro nome (Nome Completo / Número) é reconhecido", async () => {
+    const db = banco();
+    const { status, corpo } = await importarCom("Nome Completo,Número", ["Ana Souza,48999990000"]);
+    expect(status).toBe(200);
+    expect(corpo.data).toMatchObject({ imported: 1 });
+    expect(db.tentativas[0]).toMatchObject({ name: "Ana Souza", phone_number: "+5548999990000" });
+  });
+
+  it("nada reconhecível: recusa e diz quais colunas encontrou e o que usar", async () => {
+    banco();
+    const form = new FormData();
+    form.set("file", new File(["Cidade,Estado\nFloripa,SC"], "contatos.csv", { type: "text/csv" }));
+    const resposta = await POST(new NextRequest("http://localhost/api/v1/contacts/import", { method: "POST", body: form }));
+    const texto = await resposta.text();
+    expect(resposta.status).toBe(422);
+    expect(texto).toContain("Colunas encontradas: Cidade, Estado");
+    expect(texto).toContain("só nome e telefone sem cabeçalho");
+  });
+
 
   it("aceita o cabeçalho do documento do país e grava o valor como o país normaliza", async () => {
     const db = banco({ pais: "XI" });

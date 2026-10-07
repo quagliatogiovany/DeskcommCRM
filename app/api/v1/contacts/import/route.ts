@@ -30,6 +30,8 @@ import {
   CSV_MAX_BYTES,
   CSV_MAX_DATA_ROWS,
   decodificarCsv,
+  dicaDeCabecalho,
+  inferirSemCabecalho,
   mapHeader,
   mapLinha,
   parseCsv,
@@ -120,20 +122,26 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   const text = decodificado.texto;
   const rows = parseCsv(text);
-  if (rows.length < 2) {
+  if (rows.length < 1) {
     return fail("validation_failed", t("CSV vazio ou sem linhas de dados."), 422, { requestId });
   }
   const header = rows[0]!;
-  const mapeado = mapHeader(header, t, doc);
+  let mapeado = mapHeader(header, t, doc);
+  // FORK: arquivo só com nome e telefone, SEM linha de cabeçalho: a 1ª linha já é uma pessoa.
+  const semCabecalho = mapeado.motivo !== null ? inferirSemCabecalho(header) : null;
+  if (semCabecalho) mapeado = { indices: semCabecalho.indices, motivo: null };
   if (mapeado.motivo !== null) {
-    return fail("validation_failed", `${t("Cabeçalho inválido:")} ${mapeado.motivo}.`, 422, {
+    return fail("validation_failed", `${t("Cabeçalho inválido:")} ${mapeado.motivo}. ${dicaDeCabecalho(header, t)}`.trim(), 422, {
       details: { header: header.join(", ") },
       requestId,
     });
   }
+  if (!semCabecalho && rows.length < 2) {
+    return fail("validation_failed", t("CSV vazio ou sem linhas de dados."), 422, { requestId });
+  }
   const indices = mapeado.indices;
 
-  const dataRows = rows.slice(1);
+  const dataRows = semCabecalho ? rows : rows.slice(1);
   if (dataRows.length > CSV_MAX_DATA_ROWS) {
     return fail(
       "validation_failed",
@@ -147,7 +155,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   const errors: LinhaErro[] = [];
 
   for (let i = 0; i < dataRows.length; i++) {
-    const linha = i + 2; // 1-based contando o cabeçalho — bate com o editor de planilhas.
+    const linha = i + (semCabecalho ? 1 : 2); // 1-based; com cabeçalho ele conta — bate com o editor de planilhas.
     const { contato, motivo } = mapLinha(dataRows[i]!, indices, t, doc, perfil.telefoneExemplo);
     if (motivo !== null) {
       errors.push({ linha, motivo });
