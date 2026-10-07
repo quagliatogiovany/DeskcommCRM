@@ -283,6 +283,39 @@ describe("POST /api/v1/contacts/import — a planilha segue o PAÍS da organiza�
     expect(texto).toContain("só nome e telefone sem cabeçalho");
   });
 
+  // FORK: etiqueta digitada na tela da importação.
+  async function importarComEtiqueta(linhas: string[], etiqueta: string) {
+    const form = new FormData();
+    form.set("file", new File([["nome,telefone,tags", ...linhas].join("\n")], "contatos.csv", { type: "text/csv" }));
+    form.set("etiqueta", etiqueta);
+    const resposta = await POST(new NextRequest("http://localhost/api/v1/contacts/import", { method: "POST", body: form }));
+    return { status: resposta.status, corpo: await resposta.json() as { data?: Resumo } };
+  }
+
+  it("etiqueta da tela é normalizada e vai para toda pessoa nova, somada às etiquetas do arquivo", async () => {
+    const db = banco();
+    const { status, corpo } = await importarComEtiqueta(
+      ["Ana,48999990000,vip", "João,48988881111,"],
+      "  Recuperacao-2026 ",
+    );
+    expect(status).toBe(200);
+    expect(corpo.data).toMatchObject({ imported: 2 });
+    expect(db.tentativas[0]).toMatchObject({ tags: ["vip", "recuperacao-2026"] });
+    expect(db.tentativas[1]).toMatchObject({ tags: ["recuperacao-2026"] });
+  });
+
+  it("etiqueta que já estava no arquivo não duplica", async () => {
+    const db = banco();
+    await importarComEtiqueta(["Ana,48999990000,recuperacao-2026"], "recuperacao-2026");
+    expect(db.tentativas[0]).toMatchObject({ tags: ["recuperacao-2026"] });
+  });
+
+  it("sem etiqueta na tela nada muda: só as do arquivo", async () => {
+    const db = banco();
+    await importarComEtiqueta(["Ana,48999990000,vip"], "   ");
+    expect(db.tentativas[0]).toMatchObject({ tags: ["vip"] });
+  });
+
 
   it("aceita o cabeçalho do documento do país e grava o valor como o país normaliza", async () => {
     const db = banco({ pais: "XI" });

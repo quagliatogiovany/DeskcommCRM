@@ -25,6 +25,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { audit } from "@/lib/audit";
 import { encryptCpfSql, hashCpf } from "@/lib/contacts/cpf";
+import { normalizarTag, normalizarTags } from "@/lib/contacts/tag-normalizada";
 import { traduzir } from "@/lib/i18n/dicionario";
 import {
   CSV_MAX_BYTES,
@@ -78,11 +79,15 @@ export async function POST(req: NextRequest): Promise<Response> {
   const schemaDoPais = contactCreateSchemaDoPais(perfil);
 
   let file: File;
+  // FORK: etiqueta digitada na tela — vai para TODA pessoa nova desta importação (quem já existe é pulado e não a recebe).
+  let etiqueta = "";
   try {
     const form = await req.formData();
     const f = form.get("file");
     if (!(f instanceof File)) throw new Error("sem arquivo");
     file = f;
+    const e = form.get("etiqueta");
+    if (typeof e === "string") etiqueta = normalizarTag(e);
   } catch {
     return fail(
       "validation_failed",
@@ -161,6 +166,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       errors.push({ linha, motivo });
       continue;
     }
+    if (etiqueta) contato.tags = normalizarTags([...(contato.tags ?? []), etiqueta]).slice(0, 20);
     if (contato.cpf && !doc.valida(contato.cpf)) {
       // O texto sai do PERFIL: no Brasil continua "CPF inválido: …" (a mesma
       // chave do dicionário), e país sem checksum público diz na mensagem que a
