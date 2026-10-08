@@ -70,7 +70,7 @@ export const ESCOPO_DAS_ESCRITAS: Readonly<Record<string, Readonly<Record<string
   // ---- ponte com o Nodus (FORK) ----
   // Os ids daqui são do NODUS, não de registro deste banco: a ponte não tem como conferi-los contra
   // o contato do turno. Quem confere o pedido é o Nodus, pelo `telefone` + `order_id`.
-  // ⚠️ `telefone` chega como parâmetro livre do agente (não é amarrado ao contato do turno).
+  // O `telefone` do input é ignorado no turno do agente: `telefoneDaChamada` (nodus.ts) usa o do contato.
   nodus_criar_pedido: { mensagem_id: "configuracao" }, // chave de idempotência do pedido, não registro do CRM
   nodus_ativar_cliente: {},
   nodus_validar_codigo_indicacao: {},
