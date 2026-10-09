@@ -9,6 +9,7 @@ import { type NextRequest } from "next/server";
 
 import { PACING_DEFAULTS } from "@/lib/agent-engine/pacing/defaults";
 import { janelaDeEnvioAberta } from "@/lib/agent-engine/pacing/engine";
+import { janelaDeRespostaDaOrg } from "@/lib/agent-engine/pacing/janela-da-org";
 import { fusoDaJanela } from "@/lib/agent-engine/pacing/store";
 import type { TipoDeEnvio } from "@/lib/agent-engine/guardrails/before-send";
 import { ok, fail } from "@/lib/api/wrappers";
@@ -87,7 +88,7 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
       .eq("channel_session_id", conv.channel_session_id)
       .maybeSingle(),
     // Sem fuso no número, o motor avalia a janela no da organização.
-    supabase.from("organizations").select("timezone").eq("id", activeOrg.orgId).maybeSingle(),
+    supabase.from("organizations").select("timezone, settings").eq("id", activeOrg.orgId).maybeSingle(),
     supabase
       .from("messages")
       .select("created_at")
@@ -109,10 +110,15 @@ export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
   // resposta (#1984, herança coluna a coluna de `effectiveKnobs`), `window_*`
   // para disparo/follow-up. Antes TODO veto era tratado como resposta, e um
   // disparo retido às 3h era "resolvido" ou "segurado" pela janela errada.
+  // Janela de resposta da organização (definida pelo Nodus): vale onde o número não tem a sua.
+  const janelaDaOrg = janelaDeRespostaDaOrg((orgRow as { settings?: unknown } | null)?.settings);
   const respostaStartHour =
-    knobs?.resposta_start_hour ?? knobs?.window_start_hour ?? PACING_DEFAULTS.respostaStartHour;
+    knobs?.resposta_start_hour ??
+    janelaDaOrg?.startHour ??
+    knobs?.window_start_hour ??
+    PACING_DEFAULTS.respostaStartHour;
   const respostaEndHour =
-    knobs?.resposta_end_hour ?? knobs?.window_end_hour ?? PACING_DEFAULTS.respostaEndHour;
+    knobs?.resposta_end_hour ?? janelaDaOrg?.endHour ?? knobs?.window_end_hour ?? PACING_DEFAULTS.respostaEndHour;
   const disparoStartHour = knobs?.window_start_hour ?? PACING_DEFAULTS.windowStartHour;
   const disparoEndHour = knobs?.window_end_hour ?? PACING_DEFAULTS.windowEndHour;
   const timezone = fusoDaJanela(knobs?.timezone, (orgRow as { timezone?: string | null } | null)?.timezone);

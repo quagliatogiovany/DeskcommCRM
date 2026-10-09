@@ -32,8 +32,37 @@ import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/**
+ * Janela de RESPOSTA da atendente para a organização inteira (horas locais; 0 e 24 = qualquer hora).
+ * Vale para todos os números que não tenham janela própria — ver `pacing/janela-da-org.ts`.
+ */
+const janelaRespostaSchema = z
+  .object({
+    start_hour: z.number().int().min(0).max(23),
+    end_hour: z.number().int().min(1).max(24),
+  })
+  .refine((j) => j.start_hour < j.end_hour, { message: "início precisa ser antes do fim" });
+
+/** Mescla `janela_resposta` em `organizations.settings` sem apagar o resto (jsonb livre). */
+async function gravarJanelaResposta(
+  admin: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  janela: z.infer<typeof janelaRespostaSchema>,
+): Promise<string | null> {
+  const { data, error } = await admin.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+  if (error) return error.message;
+  if (!data) return "organização não encontrada";
+  const atual = (data.settings as Record<string, unknown> | null) ?? {};
+  const { error: upErr } = await admin
+    .from("organizations")
+    .update({ settings: { ...atual, janela_resposta: janela } })
+    .eq("id", orgId);
+  return upErr ? upErr.message : null;
+}
+
 const bodySchema = z.object({
   org_name: z.string().trim().min(1).max(120),
+  janela_resposta: janelaRespostaSchema.optional(),
   /** Textos-modelo da atendente (ver `onboardingStateSchema.modelo_loja`). */
   modelo_loja: z
     .object({
@@ -112,6 +141,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   if (!org) return fail("internal_error", "slug exhausted after 3 attempts", 500);
 
+  // Janela de resposta da loja (escolhida no Nodus). Falha aqui não derruba a criação: a org já
+  // existe e o Nodus reenvia pelo PATCH quando o dono salvar o horário.
+  if (parsed.data.janela_resposta) {
+    const falha = await gravarJanelaResposta(admin, org.id, parsed.data.janela_resposta);
+    if (falha) console.warn("[provisioning] janela_resposta não gravada:", falha);
+  }
+
   void audit({
     action: "tenant.created_by_provisioning_api",
     organizationId: org.id,
@@ -122,6 +158,29 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
 
   return ok({ organization_id: org.id, slug: org.slug }, { status: 201 });
+}
+
+const patchSchema = z.object({
+  organization_id: z.string().uuid(),
+  janela_resposta: janelaRespostaSchema,
+});
+
+/**
+ * PATCH /api/internal/provisioning/org — o dono mudou, no Nodus, QUANDO a atendente responde.
+ * Idempotente. Número que o operador configurou à mão (Anti-ban do canal) continua mandando nele.
+ */
+export async function PATCH(req: NextRequest): Promise<Response> {
+  if (!authorize(req)) {
+    return fail("unauthenticated", "Internal secret missing or invalid.", 401);
+  }
+  const raw = await req.json().catch(() => null);
+  const parsed = patchSchema.safeParse(raw);
+  if (!parsed.success) {
+    return fail("validation_failed", "Campos inválidos.", 422, { details: parsed.error.flatten() });
+  }
+  const falha = await gravarJanelaResposta(createAdminClient(), parsed.data.organization_id, parsed.data.janela_resposta);
+  if (falha) return fail("internal_error", `janela_resposta não gravada: ${falha}`, 500);
+  return ok({ updated: true });
 }
 
 const deleteSchema = z.object({ organization_id: z.string().uuid() });

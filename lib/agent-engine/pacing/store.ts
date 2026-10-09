@@ -11,6 +11,7 @@ import type { Logger } from '../obs/logger';
 import type { Queryable } from '../queue/queue';
 import { PACING_DEFAULTS, type PacingKnobs, type WarmupStep } from './defaults';
 import { dayStartInTz, type PacingState } from './engine';
+import { janelaDeRespostaDaOrg } from './janela-da-org';
 
 interface ChannelKnobsRow {
   throttle_ms: number | null;
@@ -32,6 +33,8 @@ interface ChannelKnobsRow {
   number_activated_at: Date | null;
   /** `organizations.timezone` — o fuso da janela de quem não escolheu um no número. */
   org_timezone?: string | null;
+  /** `organizations.settings` (jsonb livre) — de onde sai a janela de resposta da organização. */
+  org_settings?: unknown;
 }
 
 /**
@@ -103,7 +106,7 @@ export async function loadChannelKnobs(
             k.resposta_start_hour, k.resposta_end_hour,
             k.atraso_notar_ms, k.ms_por_caractere, k.atraso_minimo_ms, k.atraso_maximo_ms,
             k.allow_sunday, k.timezone, k.warmup_daily_caps, k.number_activated_at,
-            o.timezone as org_timezone
+            o.timezone as org_timezone, o.settings as org_settings
      from organizations o
      left join channel_knobs k
        on k.organization_id = o.id and k.channel_session_id = $2
@@ -114,6 +117,8 @@ export async function loadChannelKnobs(
   if (!row) {
     return { knobs: { ...PACING_DEFAULTS }, numberActivatedAt: null };
   }
+  // Janela de resposta da ORGANIZAÇÃO (definida pelo Nodus): só vale onde o número não tem a sua.
+  const janelaDaOrg = janelaDeRespostaDaOrg(row.org_settings);
   let warmupDailyCaps = PACING_DEFAULTS.warmupDailyCaps;
   if (row.warmup_daily_caps !== null) {
     const parsed = parseWarmupCaps(row.warmup_daily_caps);
@@ -143,8 +148,13 @@ export async function loadChannelKnobs(
       // que rodou a 0495 porém nunca gravou as colunas teria resposta bloqueada
       // fora de 7h-22h (o default do arquivo), que é justamente o que ele já
       // fazia — mas por outro caminho, e ninguém saberia dizer qual.
-      respostaStartHour: row.resposta_start_hour ?? row.window_start_hour ?? PACING_DEFAULTS.respostaStartHour,
-      respostaEndHour: row.resposta_end_hour ?? row.window_end_hour ?? PACING_DEFAULTS.respostaEndHour,
+      respostaStartHour:
+        row.resposta_start_hour ??
+        janelaDaOrg?.startHour ??
+        row.window_start_hour ??
+        PACING_DEFAULTS.respostaStartHour,
+      respostaEndHour:
+        row.resposta_end_hour ?? janelaDaOrg?.endHour ?? row.window_end_hour ?? PACING_DEFAULTS.respostaEndHour,
       allowSunday: row.allow_sunday ?? PACING_DEFAULTS.allowSunday,
       timezone: fusoDaJanela(row.timezone, row.org_timezone),
       warmupDailyCaps,
