@@ -163,6 +163,8 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
   nodus_consultar_promocoes: "sem_funil",
   nodus_validar_codigo_indicacao: "sem_funil",
   nodus_ativar_cliente: "sem_funil",
+  nodus_sugerir_complemento: "sem_funil",
+  nodus_meta_semana: "sem_funil",
 };
 
 /**

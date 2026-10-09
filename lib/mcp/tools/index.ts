@@ -61,6 +61,8 @@ import {
   nodusConsultarPromocoes,
   nodusValidarCodigoIndicacao,
   nodusAtivarCliente,
+  nodusSugerirComplemento,
+  nodusMetaSemana,
 } from "./nodus";
 import { crmListPrivacyRequests } from "./privacidade";
 import {
@@ -139,6 +141,8 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   nodusConsultarCatalogo,
   nodusConsultarPromocoes,
   nodusStatusPedido,
+  nodusSugerirComplemento,
+  nodusMetaSemana,
   // read — organizar a operação (W4)
   crmListStages,
   crmListTags,

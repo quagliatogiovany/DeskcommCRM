@@ -369,3 +369,84 @@ export const nodusAtivarCliente: McpToolDefinition<typeof ativarClienteInputShap
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// nodus_sugerir_complemento
+// ---------------------------------------------------------------------------
+
+const sugerirComplementoInputShape = {
+  telefone: z.string().trim().min(8).describe("Telefone do cliente, o mesmo usado no cadastro."),
+  produto_ids: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(30)
+    .describe("`produtoId` dos itens que o cliente JÁ escolheu (vindos de nodus_consultar_catalogo)."),
+};
+
+interface NodusSugestaoUpsell {
+  produtoId: string;
+  nome: string;
+  preco: number;
+  motivo: "combina" | "margem" | "categoria";
+}
+
+export const nodusSugerirComplemento: McpToolDefinition<typeof sugerirComplementoInputShape> = {
+  name: "nodus_sugerir_complemento",
+  description:
+    "Pede à loja UM produto para oferecer junto do que o cliente já escolheu (bebida com lanche, sobremesa " +
+    "com prato). A escolha é feita pela loja por regra fixa e já fica registrada como oferta: use o produto " +
+    "devolvido, não invente outro. Ofereça no máximo uma vez por pedido e só com o produto já definido; se o " +
+    "cliente recusar, siga sem insistir. Se `sugestao` vier vazio, não há o que oferecer: siga o pedido normal.",
+  inputSchema: sugerirComplementoInputShape,
+  category: "read",
+  requiresRole: "agent",
+  requiresScope: "mcp:read",
+  handler: async (input, ctx) => {
+    const telefone = await telefoneDaChamada(ctx, input.telefone);
+    if (!telefone) return { sucesso: false, mensagem: MSG_SEM_TELEFONE };
+    try {
+      const body = (await nodusRequest(ctx, {
+        method: "GET",
+        path: "api/integrations/deskcomm/upsell",
+        query: { telefone, produtos: input.produto_ids.join(",") },
+      })) as { sugestao: NodusSugestaoUpsell | null };
+      return { sucesso: true, sugestao: body.sugestao };
+    } catch (err) {
+      if (err instanceof NodusApiError) {
+        return { sucesso: false, mensagem: mensagemParaCodigoNodus(err.code, err.message) };
+      }
+      throw err;
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// nodus_meta_semana
+// ---------------------------------------------------------------------------
+
+const metaSemanaInputShape = {};
+
+export const nodusMetaSemana: McpToolDefinition<typeof metaSemanaInputShape> = {
+  name: "nodus_meta_semana",
+  description:
+    "Mostra como a loja está na semana: pedidos e faturamento até agora, a meta que o dono definiu e quanto " +
+    "falta. É só para você saber o ritmo e se empenhar em vender; NUNCA comente a meta, números de faturamento " +
+    "ou pressão de vendas com o cliente.",
+  inputSchema: metaSemanaInputShape,
+  category: "read",
+  requiresRole: "agent",
+  requiresScope: "mcp:read",
+  handler: async (_input, ctx) => {
+    try {
+      const body = (await nodusRequest(ctx, { method: "GET", path: "api/integrations/deskcomm/meta-semana" })) as {
+        meta: object;
+      };
+      return { sucesso: true, ...body.meta };
+    } catch (err) {
+      if (err instanceof NodusApiError) {
+        return { sucesso: false, mensagem: mensagemParaCodigoNodus(err.code, err.message) };
+      }
+      throw err;
+    }
+  },
+};

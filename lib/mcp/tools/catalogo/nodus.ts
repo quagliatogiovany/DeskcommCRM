@@ -88,4 +88,25 @@ export const TOOLS_NODUS = declararTools([
     risco: "atencao",
     pacotes: ["atender"],
   },
+  {
+    name: "nodus_sugerir_complemento",
+    category: "read",
+    rotulo: "Sugerir um item a mais no pedido (upsell)",
+    explicacao:
+      "Pede à loja de delivery (Nodus) um produto para oferecer junto do que o cliente já escolheu, por regra fixa (o que mais sai junto, margem, estoque). A oferta fica registrada para medir a taxa de aceite.",
+    oQueToca: "Catálogo da loja de delivery",
+    risco: "seguro",
+    // "reter", não "atender": o Atender já estoura o teto (ver cabeçalho) e o "vender" é o default do onboarding.
+    pacotes: ["reter"],
+  },
+  {
+    name: "nodus_meta_semana",
+    category: "read",
+    rotulo: "Ver a meta de vendas da semana",
+    explicacao:
+      "Mostra pedidos e faturamento da semana contra a meta que o dono definiu na loja de delivery (Nodus). Só para o assistente saber o ritmo; ele não comenta isso com o cliente.",
+    oQueToca: "Pedidos da loja de delivery",
+    risco: "seguro",
+    pacotes: ["reter"], // idem nodus_sugerir_complemento
+  },
 ]);
