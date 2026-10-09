@@ -12,6 +12,8 @@ import { audit } from "@/lib/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { aiAgentDefaultSchema, type PromptTemplate } from "@/lib/schemas/onboarding";
 import { publicarMemoriaDaOrg } from "@/lib/ai/memoria-da-org";
+import { cadastrarFaqDoModelo } from "@/lib/ai/modelo-loja";
+import type { OnboardingState } from "@/lib/schemas/onboarding";
 import {
   requireOnboardingCtx,
   patchOnboardingState,
@@ -135,14 +137,19 @@ export async function createDefaultAgent(formData: FormData): Promise<CreateAgen
   // passo: o funcionário nasce sem essa frase, que é degradação honesta — o
   // contrário seria travar a contratação por causa de um adjetivo.
   let oQueFaz: string | undefined;
+  let modeloLoja: OnboardingState["modelo_loja"];
   try {
     const { state } = await loadOnboardingState(ctx.orgId);
     oQueFaz = state.welcome?.o_que_faz;
+    modeloLoja = state.modelo_loja;
   } catch {
     oQueFaz = undefined;
   }
 
-  const systemPrompt = PROMPT_BODIES[input.prompt_template](ondeTrabalha(ctx.orgName, oQueFaz));
+  // Org provisionada pelo Nodus traz as instruções-modelo da atendente: elas SUBSTITUEM o
+  // texto curto do "jeito de falar" (que já está embutido nelas). Sem modelo, fluxo de sempre.
+  const systemPrompt =
+    modeloLoja?.instrucoes.trim() || PROMPT_BODIES[input.prompt_template](ondeTrabalha(ctx.orgName, oQueFaz));
 
   // O agente padrão do onboarding é UM por organização, e o banco já garante
   // isso: `ai_agents_one_default_per_org` é índice único parcial em
@@ -217,7 +224,18 @@ export async function createDefaultAgent(formData: FormData): Promise<CreateAgen
     if (!pub.ok) regrasNaoSalvas = pub.mensagem;
   }
 
-  const publicacao = await publishFirstVersion(admin, ctx.orgId, agent, systemPrompt, ctx.userId);
+  // FAQ-modelo: material da organização, ligado já na 1ª versão. Falha vira "sem FAQ", não derruba o passo.
+  const faqId = modeloLoja?.faq.trim() ? await cadastrarFaqDoModelo(admin, ctx.orgId, modeloLoja.faq) : null;
+
+  const publicacao = await publishFirstVersion(
+    admin,
+    ctx.orgId,
+    agent,
+    systemPrompt,
+    ctx.userId,
+    undefined,
+    faqId ? [faqId] : [],
+  );
 
   // Estado, audit e evento saem em QUALQUER desfecho da publicação: o agente
   // existe, e o passo do onboarding é "configurar IA", não "publicar". Deixar

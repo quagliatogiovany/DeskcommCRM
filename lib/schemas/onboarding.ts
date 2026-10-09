@@ -83,6 +83,19 @@ export const onboardingStateSchema = z.object({
       skipped: z.boolean().optional(),
     })
     .optional(),
+  /**
+   * Textos-modelo mandados pelo Nodus no provisionamento da organização
+   * (`POST /api/internal/provisioning/org`). O wizard de IA usa `instrucoes` como
+   * prompt do agente, pré-preenche as regras da casa com `documento` e cadastra
+   * `faq` como material. Tudo editável depois; nada aqui é regra dura.
+   */
+  modelo_loja: z
+    .object({
+      instrucoes: z.string().max(20000),
+      documento: z.string().max(20000),
+      faq: z.string().max(50000),
+    })
+    .optional(),
   ai: z
     .object({
       agent_id: z.string(),

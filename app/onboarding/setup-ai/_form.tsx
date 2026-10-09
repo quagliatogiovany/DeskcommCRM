@@ -46,17 +46,19 @@ const JEITOS: { id: PromptTemplate; titulo: string; desc: string }[] = [
 ];
 
 interface Props {
+  /** Regras da casa já escritas (modelo da loja mandado pelo Nodus); vazio = campo em branco. */
+  regrasIniciais?: string;
   /** O que ele já sabe fazer, em linguagem de dono de negócio. */
   capacidades: string[];
   /** O que ele nunca faz — as conferências antes de cada mensagem sair. */
   conferencias: string[];
 }
 
-export function SetupAiForm({ capacidades, conferencias }: Props) {
+export function SetupAiForm({ capacidades, conferencias, regrasIniciais = "" }: Props) {
   const t = useT();
   const [name, setName] = useState("Atendente IA");
   const [jeito, setJeito] = useState<PromptTemplate>("ecommerce_friendly");
-  const [regras, setRegras] = useState("");
+  const [regras, setRegras] = useState(regrasIniciais);
   const [naoPublicado, setNaoPublicado] = useState<string | null>(null);
   const [causa, setCausa] = useState<"canal" | "modelo" | "chave" | null>(null);
   const [provedor, setProvedor] = useState<string | null>(null);
@@ -163,7 +165,7 @@ export function SetupAiForm({ capacidades, conferencias }: Props) {
             name="regras_da_casa"
             value={regras}
             onChange={(e) => setRegras(e.target.value)}
-            rows={5}
+            rows={regrasIniciais ? 16 : 5}
             maxLength={20000}
             placeholder={
               `${t("Nunca prometa desconto sem confirmar com uma pessoa.")}\n` +

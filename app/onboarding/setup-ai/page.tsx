@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
 import { lerRetratoDaInstalacao } from "@/lib/instalacao/retrato";
+import { loadOnboardingState } from "@/app/actions/onboarding/_shared";
 import { SetupAiForm } from "./_form";
 import { InteligenciaDele } from "./_inteligencia";
 import { capacidadesPadraoDoOnboarding } from "@/lib/ai/agents/capacidades-padrao";
@@ -43,6 +44,15 @@ export default async function SetupAiPage() {
 
   const conferencias = CONFERENCIAS_DE_SAIDA.map((c) => traduzir(c.rotulo, idioma));
 
+  // Loja provisionada pelo Nodus: as regras da casa já vêm escritas (o dono edita antes de salvar).
+  let regrasIniciais = "";
+  try {
+    const { state } = await loadOnboardingState(activeOrg.orgId);
+    regrasIniciais = state.modelo_loja?.documento ?? "";
+  } catch {
+    regrasIniciais = "";
+  }
+
   return (
     <div className="space-y-6">
       <header>
@@ -65,7 +75,11 @@ export default async function SetupAiPage() {
         }}
       />
 
-      <SetupAiForm capacidades={capacidades} conferencias={conferencias} />
+      <SetupAiForm
+        capacidades={capacidades}
+        conferencias={conferencias}
+        regrasIniciais={regrasIniciais}
+      />
     </div>
   );
 }

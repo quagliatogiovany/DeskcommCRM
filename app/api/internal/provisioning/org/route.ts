@@ -5,6 +5,9 @@
  * Auth: mesmo padrão de `app/api/internal/agents/run` — `x-internal-secret`
  * (preferido) ou `authorization: Bearer <INTERNAL_SECRET>`.
  *
+ * `modelo_loja` (opcional): textos-modelo da atendente, guardados em
+ * `onboarding_state.modelo_loja` pro wizard de IA usar quando o dono entrar.
+ *
  * Escopo deliberadamente mínimo (não cria usuário nem agente de IA): sem um
  * dono logado não há para quem publicar a 1ª versão (`publishFirstVersion`
  * exige canal de WhatsApp conectado, que só existe depois que alguém entra e
@@ -31,6 +34,14 @@ export const runtime = "nodejs";
 
 const bodySchema = z.object({
   org_name: z.string().trim().min(1).max(120),
+  /** Textos-modelo da atendente (ver `onboardingStateSchema.modelo_loja`). */
+  modelo_loja: z
+    .object({
+      instrucoes: z.string().max(20000),
+      documento: z.string().max(20000),
+      faq: z.string().max(50000),
+    })
+    .optional(),
 });
 
 function timingSafeEq(a: string, b: string): boolean {
@@ -89,6 +100,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         display_name: orgName,
         legal_name: orgName,
         status: "active",
+        ...(parsed.data.modelo_loja ? { onboarding_state: { modelo_loja: parsed.data.modelo_loja } } : {}),
       })
       .select("id, slug")
       .single();

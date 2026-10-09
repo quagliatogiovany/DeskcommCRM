@@ -88,6 +88,8 @@ export async function publishFirstVersion(
   systemPrompt: string,
   userId: string,
   selection?: { channelId: string; provider: string; model: string; credentialId: string | null },
+  /** Materiais da organização que o agente já nasce consultando (ex.: o FAQ-modelo do Nodus). */
+  knowledgeSourceIds: string[] = [],
 ): Promise<PublishOutcome> {
   // Já publicado numa passagem anterior: republicar colidiria com
   // `ai_agent_versions_unique_number` sem ganhar nada.
@@ -279,6 +281,7 @@ export async function publishFirstVersion(
       credential_id: credentialId,
       tool_ids: selection ? [] : capacidadesPadraoDoOnboarding(),
       pipeline_ids: pipelineIds,
+      knowledge_source_ids: knowledgeSourceIds,
       // Casos ligados desde o nascimento: sem isso o agente promete "vou verificar
       // com a loja" (frete grátis, desconto...) e ninguém é avisado — a tool
       // open_human_case só existe com cases_enabled.
