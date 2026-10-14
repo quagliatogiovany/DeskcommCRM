@@ -37,6 +37,18 @@ export const CAMPANHAS_VIVAS = [
   "paused",
 ] as const;
 
+/**
+ * Estados que RESERVAM contatos. `draft` fica de fora: rascunho é intenção, não
+ * compromisso — senão uma tentativa de preparar que falhou trava a lista nova.
+ */
+export const CAMPANHAS_QUE_RESERVAM = [
+  "preparing",
+  "ready",
+  "scheduled",
+  "running",
+  "paused",
+] as const;
+
 export const filtroDeAudienciaSchema = z
   .strictObject({
     /** Contato precisa ter TODAS estas etiquetas. */

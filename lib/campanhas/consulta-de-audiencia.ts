@@ -13,7 +13,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { CAMPANHAS_VIVAS, limiteDeSilencio, usaNegocio, type FiltroDeAudiencia } from "./audiencia";
+import { CAMPANHAS_QUE_RESERVAM, limiteDeSilencio, usaNegocio, type FiltroDeAudiencia } from "./audiencia";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { recusouMarketing, type CandidatoDaAudiencia } from "./elegibilidade";
 import { camposUsadosNoTexto, type CamposPersonalizados } from "./renderizador";
@@ -270,7 +270,7 @@ export async function contatosJaEmCampanha(
     .from("campaigns")
     .select("id")
     .eq("organization_id", organizationId)
-    .in("status", CAMPANHAS_VIVAS);
+    .in("status", CAMPANHAS_QUE_RESERVAM);
   if (exceto) vivas = vivas.neq("id", exceto);
   const { data: campanhas, error } = await vivas;
   if (error) throw new Error(`audiência: campanhas vivas — ${error.message}`);
@@ -281,6 +281,7 @@ export async function contatosJaEmCampanha(
     .from("campaign_recipients")
     .select("contact_id")
     .eq("organization_id", organizationId)
+    .eq("eligibility_status", "eligible")
     .in("campaign_id", ids);
   if (erroDest) throw new Error(`audiência: comprometidos — ${erroDest.message}`);
   return new Set((data ?? []).map((r) => (r as { contact_id: string }).contact_id));

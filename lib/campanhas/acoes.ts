@@ -26,7 +26,7 @@ import { prepararCampanha } from "./preparacao";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { camposDoDestinatario } from "./consulta-de-audiencia";
 import { escolherVariante, renderizar } from "./renderizador";
-import type { StatusDaCampanha } from "./tipos";
+import { TEXTO_DA_EXCLUSAO, type MotivoDeExclusao, type StatusDaCampanha } from "./tipos";
 
 export interface CampanhaCarregada {
   id: string;
@@ -183,8 +183,7 @@ export async function prepararAcao(
       return {
         ok: false,
         codigo: "campanha_sem_elegiveis",
-        mensagem:
-          "O recorte encontrou contatos, mas nenhum pode receber — veja os motivos na prévia.",
+        mensagem: `O recorte encontrou ${resumo.total} contato(s), mas nenhum pode receber. ${descreverMotivos(resumo.motivos)}`,
         status: 422,
       };
     }
@@ -214,6 +213,13 @@ export async function prepararAcao(
       status: 422,
     };
   }
+}
+
+function descreverMotivos(motivos: Partial<Record<MotivoDeExclusao, number>>): string {
+  const partes = Object.entries(motivos)
+    .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+    .map(([m, n]) => `${n} — ${TEXTO_DA_EXCLUSAO[m as MotivoDeExclusao]}`);
+  return partes.length ? `Motivos: ${partes.join("; ")}.` : "";
 }
 
 async function voltarAoRascunho(admin: SupabaseClient, id: string, codigo: string): Promise<void> {
