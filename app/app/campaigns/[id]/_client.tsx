@@ -15,9 +15,12 @@
  * lado do número, ele conclui que o sistema comeu a lista.
  */
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { EstadoDaCampanha } from "@/components/campanhas/EstadoDaCampanha";
+import { SeletorDeHora, erroDaJanela } from "@/components/campanhas/SeletorDeHora";
+import { EditorDeVariantes } from "@/components/campanhas/EditorDeVariantes";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -49,6 +52,10 @@ export function DetalheDaCampanha({ id }: { id: string }) {
   const acao = useAcaoDeCampanha(id);
   const [confirmando, setConfirmando] = useState<AcaoDeCampanha | null>(null);
   const [testando, setTestando] = useState(false);
+  const router = useRouter();
+  const [editandoTexto, setEditandoTexto] = useState<string | null>(null);
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [removendo, setRemovendo] = useState<"selecionados" | "todos" | null>(null);
 
   if (campanha.isLoading) {
     return (
@@ -88,6 +95,21 @@ export function DetalheDaCampanha({ id }: { id: string }) {
   if (c.status === "scheduled") disponiveis.push("pausar", "cancelar");
   if (c.status === "paused") disponiveis.push("retomar", "cancelar");
   disponiveis.push("duplicar");
+
+  // Texto novo só com a campanha PARADA: com ela enviando, a troca correria
+  // contra o worker. Tirar gente da lista cabe também em `running` — a linha
+  // pendente é revalidada na hora do envio.
+  const podeTrocarTexto = c.status === "ready" || c.status === "scheduled" || c.status === "paused";
+  const podeTirarDaLista = podeTrocarTexto || c.status === "running";
+  const removiveis = linhas.filter((d) => d.status === "pending" && d.eligibility_status === "eligible");
+  const pendentesNaLista = m?.contagem.pendentes ?? 0;
+  const alternar = (idLinha: string) =>
+    setSelecionados((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(idLinha)) novo.delete(idLinha);
+      else novo.add(idLinha);
+      return novo;
+    });
 
   return (
     <div className="space-y-4 p-6">
@@ -131,6 +153,17 @@ export function DetalheDaCampanha({ id }: { id: string }) {
                 // O teste precisa saber PARA QUEM: mandar para o primeiro da
                 // lista transformaria um teste num envio real a um prospect.
                 else if (a === "testar") setTestando(true);
+                else if (a === "duplicar")
+                  acao.mutate(
+                    { acao: a },
+                    {
+                      // A cópia é outra campanha: leva para ela, onde a lista já veio montada.
+                      onSuccess: (res) => {
+                        const novoId = (res as { data?: { id?: string } })?.data?.id;
+                        if (novoId) router.push(`/app/campaigns/${novoId}`);
+                      },
+                    },
+                  );
                 else acao.mutate({ acao: a });
               }}
             >
@@ -216,7 +249,47 @@ export function DetalheDaCampanha({ id }: { id: string }) {
 
       <Card className="space-y-2 p-4">
         <h2 className="font-medium">{t("Mensagem")}</h2>
-        <p className="whitespace-pre-wrap text-sm">{c.message_body}</p>
+        {editandoTexto === null ? (
+          <>
+            <p className="whitespace-pre-wrap text-sm">{c.message_body}</p>
+            {podeTrocarTexto && c.snapshot_total > 0 && (
+              <Button size="sm" variant="outline" onClick={() => setEditandoTexto(c.message_body ?? "")}>
+                {t("Trocar mensagem de quem ainda não recebeu")}
+              </Button>
+            )}
+            {c.status === "running" && (
+              <p className="text-xs text-muted-foreground">
+                {t("Para trocar o texto de quem ainda não recebeu, pause a campanha primeiro.")}
+              </p>
+            )}
+          </>
+        ) : (
+          <div className="space-y-3">
+            <EditorDeVariantes rows={6} value={editandoTexto} onChange={setEditandoTexto} ariaLabel={t("Nova mensagem")} />
+            <p className="text-sm text-muted-foreground">
+              {t(
+                "Vale só para quem ainda não recebeu ({n} pessoas na fila). Quem já recebeu continua com o texto antigo. Se o texto novo usar um dado que algum contato não tem, essa pessoa sai da lista.",
+              ).replace("{n}", String(pendentesNaLista))}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={acao.isPending || editandoTexto.trim() === "" || editandoTexto.trim() === (c.message_body ?? "").trim()}
+                onClick={() =>
+                  acao.mutate(
+                    { acao: "editar-mensagem", corpo: { message_body: editandoTexto } },
+                    { onSuccess: () => setEditandoTexto(null) },
+                  )
+                }
+              >
+                {acao.isPending ? t("Salvando…") : t("Salvar nova mensagem")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setEditandoTexto(null)}>
+                {t("Cancelar")}
+              </Button>
+            </div>
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">
           {t("Base legal")}: {c.base_legal === "consent" ? t("consentimento") : t("interesse legítimo")}
           {c.lia_ref ? ` (${c.lia_ref})` : ""}
@@ -243,6 +316,69 @@ export function DetalheDaCampanha({ id }: { id: string }) {
           </select>
         </div>
 
+        {podeTirarDaLista && pendentesNaLista > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setSelecionados(
+                  selecionados.size === removiveis.length ? new Set() : new Set(removiveis.map((d) => d.id)),
+                )
+              }
+              disabled={removiveis.length === 0}
+            >
+              {selecionados.size === removiveis.length && removiveis.length > 0
+                ? t("Desmarcar todos da tela")
+                : t("Marcar todos da tela")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selecionados.size === 0 || acao.isPending}
+              onClick={() => setRemovendo("selecionados")}
+            >
+              {t("Tirar da campanha")} ({selecionados.size})
+            </Button>
+            <Button size="sm" variant="outline" disabled={acao.isPending} onClick={() => setRemovendo("todos")}>
+              {t("Tirar todos que ainda não receberam")}
+            </Button>
+          </div>
+        )}
+
+        {removendo && (
+          <Card className="space-y-3 border-warning-fg p-4">
+            <p className="text-sm">
+              {removendo === "todos"
+                ? `${t("Tirar da campanha as")} ${pendentesNaLista} ${t("pessoas que ainda não receberam?")}`
+                : `${t("Tirar da campanha as")} ${selecionados.size} ${t("pessoas selecionadas?")}`}{" "}
+              {t(
+                "Elas deixam de receber esta mensagem e passam a aparecer como “Fora da lista”. Quem já recebeu não é afetado. Os contatos continuam no seu CRM — só saem desta campanha, e não dá para desfazer aqui (para incluir de novo, faça uma nova campanha).",
+              )}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                disabled={acao.isPending}
+                onClick={() => {
+                  acao.mutate(
+                    {
+                      acao: "remover-destinatarios",
+                      corpo: removendo === "todos" ? { todos: true } : { ids: [...selecionados] },
+                    },
+                    { onSuccess: () => setSelecionados(new Set()) },
+                  );
+                  setRemovendo(null);
+                }}
+              >
+                {t("Confirmar")}
+              </Button>
+              <Button variant="outline" onClick={() => setRemovendo(null)}>
+                {t("Voltar")}
+              </Button>
+            </div>
+          </Card>
+        )}
+
         {c.snapshot_total === 0 ? (
           <p className="text-sm text-muted-foreground">
             {t("A lista ainda não foi montada. Use Preparar para ver quem entra.")}
@@ -251,8 +387,16 @@ export function DetalheDaCampanha({ id }: { id: string }) {
           <div className="divide-y divide-border">
             {linhas.map((d) => (
               <div key={d.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span className="min-w-0 truncate">
-                  {rotuloDoContato(d.contacts, t)}
+                <span className="flex min-w-0 items-center gap-2">
+                  {podeTirarDaLista && d.status === "pending" && d.eligibility_status === "eligible" && (
+                    <input
+                      type="checkbox"
+                      checked={selecionados.has(d.id)}
+                      onChange={() => alternar(d.id)}
+                      aria-label={t("Selecionar contato")}
+                    />
+                  )}
+                  <span className="truncate">{rotuloDoContato(d.contacts, t)}</span>
                 </span>
                 <span className="shrink-0 text-muted-foreground">
                   {d.eligibility_status === "excluded"
@@ -438,13 +582,16 @@ function RitmoDaCampanha({ campanha }: { campanha: CampanhaDetalhada }) {
         <CampoDeRitmo id="r-dia" rotulo={t("Máximo por dia")} valor={tetoDia} onChange={setTetoDia} />
         <CampoDeRitmo id="r-hora" rotulo={t("Máximo por hora")} valor={tetoHora} onChange={setTetoHora} />
         <div />
-        <CampoDeRitmo id="r-inicio" rotulo={t("Enviar só a partir das (hora)")} valor={inicio} onChange={setInicio} />
-        <CampoDeRitmo id="r-fim" rotulo={t("Parar de enviar às (hora)")} valor={fim} onChange={setFim} />
+        <SeletorDeHora id="r-inicio" tipo="inicio" rotulo={t("Enviar só a partir das")} valor={inicio} onChange={setInicio} />
+        <SeletorDeHora id="r-fim" tipo="fim" rotulo={t("Parar de enviar às")} valor={fim} onChange={setFim} />
+        {erroDaJanela(inicio, fim, t) && (
+          <p className="text-sm text-error-fg sm:col-span-2">{erroDaJanela(inicio, fim, t)}</p>
+        )}
       </div>
       <div className="flex items-center gap-3">
         <Button
           size="sm"
-          disabled={editar.isPending}
+          disabled={editar.isPending || erroDaJanela(inicio, fim, t) !== ""}
           onClick={() =>
             editar.mutate({
               intervalo_segundos: numero(intervalo),
@@ -514,6 +661,8 @@ const ROTULO_DA_ACAO: Record<AcaoDeCampanha, string> = {
   cancelar: "Cancelar campanha",
   duplicar: "Duplicar",
   testar: "Enviar teste",
+  "editar-mensagem": "Trocar mensagem",
+  "remover-destinatarios": "Tirar da campanha",
 };
 
 const ROTULO_DO_DESTINATARIO: Record<string, string> = {

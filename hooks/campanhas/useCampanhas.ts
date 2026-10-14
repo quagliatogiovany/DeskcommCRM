@@ -156,7 +156,9 @@ export type AcaoDeCampanha =
   | "retomar"
   | "cancelar"
   | "duplicar"
-  | "testar";
+  | "testar"
+  | "editar-mensagem"
+  | "remover-destinatarios";
 
 export function useAcaoDeCampanha(id: string) {
   const qc = useQueryClient();

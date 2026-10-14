@@ -27,13 +27,21 @@ import {
   cancelarAcao,
   carregarCampanha,
   duplicarAcao,
+  editarMensagemAcao,
   iniciarAcao,
+  removerDestinatariosAcao,
   pausarAcao,
   prepararAcao,
   testarAcao,
   type Desfecho,
 } from "@/lib/campanhas/acoes";
-import { agendarSchema, testarSchema } from "@/lib/campanhas/schemas";
+import { gravarPool, lerPoolExtra } from "@/lib/campanhas/pool-de-numeros";
+import {
+  agendarSchema,
+  editarMensagemSchema,
+  removerDestinatariosSchema,
+  testarSchema,
+} from "@/lib/campanhas/schemas";
 import { knobsDoCanal } from "@/lib/automation/janela-do-canal";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { requireSupportWrite } from "@/lib/impersonate/support";
@@ -50,6 +58,8 @@ const ACOES = [
   "cancelar",
   "duplicar",
   "testar",
+  "editar-mensagem",
+  "remover-destinatarios",
 ] as const;
 
 type Acao = (typeof ACOES)[number];
@@ -124,8 +134,47 @@ export async function POST(
       break;
     }
     case "duplicar": {
-      desfecho = await duplicarAcao(admin, campanha, authz.user.id);
+      const copia = await duplicarAcao(admin, campanha, authz.user.id);
+      desfecho = copia;
       acaoAuditada = "campaign.duplicated";
+      if (copia.ok) {
+        // Os números do rodízio vão junto — a cópia nasce falando pelos mesmos.
+        const extras = await lerPoolExtra(admin, authz.org.orgId, campanha.id);
+        if (extras.length > 0) {
+          await gravarPool(admin, {
+            organizationId: authz.org.orgId,
+            campanhaId: copia.id,
+            principal: campanha.channel_session_id,
+            extras,
+          });
+        }
+        // A lista vai junto: a cópia já nasce preparada com o mesmo recorte. Se
+        // não der (a original ainda reserva esses contatos, por exemplo), a cópia
+        // fica como rascunho e o operador prepara quando quiser — sem erro.
+        const nova = await carregarCampanha(admin, authz.org.orgId, copia.id);
+        const preparo = nova.ok ? await prepararAcao(admin, nova.campanha, agora) : null;
+        extra = { origem: campanha.id };
+        desfecho = { ...copia, preparada: preparo?.ok === true };
+      }
+      break;
+    }
+    case "editar-mensagem": {
+      const parsed = editarMensagemSchema.safeParse(await req.json().catch(() => null));
+      if (!parsed.success) {
+        return fail("validation_failed", t("Escreva a mensagem."), 422, { requestId });
+      }
+      desfecho = await editarMensagemAcao(admin, campanha, parsed.data.message_body);
+      acaoAuditada = "campaign.message_edited";
+      break;
+    }
+    case "remover-destinatarios": {
+      const parsed = removerDestinatariosSchema.safeParse(await req.json().catch(() => null));
+      if (!parsed.success) {
+        return fail("validation_failed", t("Selecione quem sai da lista."), 422, { requestId });
+      }
+      desfecho = await removerDestinatariosAcao(admin, campanha, parsed.data);
+      acaoAuditada = "campaign.recipients_removed";
+      extra = { todos: parsed.data.todos === true, quantidade_pedida: parsed.data.ids?.length ?? null };
       break;
     }
     case "testar": {

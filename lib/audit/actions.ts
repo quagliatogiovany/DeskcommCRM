@@ -924,6 +924,10 @@ export const AUDIT_ACTIONS = [
   "campaign.resumed",
   "campaign.cancelled",
   "campaign.duplicated",
+  // Trocar o texto de quem ainda não recebeu e tirar gente da lista de uma
+  // campanha já preparada: ambos mudam o que sai para quem não pediu.
+  "campaign.message_edited",
+  "campaign.recipients_removed",
   // Rodada do cron que MEXEU em alguma campanha (enviou, pulou, concluiu,
   // promoveu agendada). Rodada vazia não audita — o critério do `CLAUDE.md`.
   "cron.campaign_worker",

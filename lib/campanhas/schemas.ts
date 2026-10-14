@@ -116,6 +116,13 @@ export const criarExclusaoSchema = z.object({
 
 export const agendarSchema = z.object({ scheduled_at: z.string().datetime() });
 export const testarSchema = z.object({ contact_id: z.string().uuid() });
+export const editarMensagemSchema = z.object({ message_body: z.string().trim().min(1).max(4000) });
+export const removerDestinatariosSchema = z
+  .object({
+    ids: z.array(z.string().uuid()).min(1).max(5000).optional(),
+    todos: z.boolean().optional(),
+  })
+  .refine((v) => v.todos === true || (v.ids?.length ?? 0) > 0, { message: "Selecione quem sai da lista." });
 
 export const listarCampanhasSchema = z.object({
   status: z.string().trim().max(20).optional(),

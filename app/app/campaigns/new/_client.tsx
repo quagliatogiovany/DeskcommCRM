@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { useCriarCampanha, usePreviaDaAudiencia } from "@/hooks/campanhas/useCampanhas";
 import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
 import { EditorDeVariantes, type EditorDeVariantesHandle } from "@/components/campanhas/EditorDeVariantes";
+import { SeletorDeHora, erroDaJanela } from "@/components/campanhas/SeletorDeHora";
 import { useT } from "@/hooks/i18n/useT";
 import {
   useAgentesPublicados,
@@ -91,6 +92,7 @@ export function NovaCampanha() {
     canal !== "" &&
     texto.trim() !== "" &&
     temCriterio &&
+    erroDaJanela(janelaInicio, janelaFim, t) === "" &&
     (baseLegal !== "legitimate_interest" || liaRef.trim() !== "");
 
   async function salvar() {
@@ -481,28 +483,23 @@ export function NovaCampanha() {
               onChange={(e) => setTetoHorario(e.target.value)}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="janela-inicio">{t("Enviar só a partir das (hora)")}</Label>
-            <Input
-              id="janela-inicio"
-              type="number"
-              min={0}
-              max={23}
-              value={janelaInicio}
-              onChange={(e) => setJanelaInicio(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="janela-fim">{t("Parar de enviar às (hora)")}</Label>
-            <Input
-              id="janela-fim"
-              type="number"
-              min={1}
-              max={24}
-              value={janelaFim}
-              onChange={(e) => setJanelaFim(e.target.value)}
-            />
-          </div>
+          <SeletorDeHora
+            id="janela-inicio"
+            tipo="inicio"
+            rotulo={t("Enviar só a partir das")}
+            valor={janelaInicio}
+            onChange={setJanelaInicio}
+          />
+          <SeletorDeHora
+            id="janela-fim"
+            tipo="fim"
+            rotulo={t("Parar de enviar às")}
+            valor={janelaFim}
+            onChange={setJanelaFim}
+          />
+          {erroDaJanela(janelaInicio, janelaFim, t) && (
+            <p className="text-sm text-error-fg sm:col-span-2">{erroDaJanela(janelaInicio, janelaFim, t)}</p>
+          )}
         </div>
       </Card>
 

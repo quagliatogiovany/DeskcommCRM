@@ -339,16 +339,51 @@ export async function cancelarAcao(
   return { ok: true, cancelados: (cancelados ?? []).length };
 }
 
+/** "Promo (cópia 2)" → "Promo": a cópia da cópia numera a partir do nome original. */
+function nomeBase(nome: string): string {
+  return nome.replace(/\s*\(cópia(?: \d+)?\)\s*$/i, "").trim();
+}
+
+async function proximoNomeDeCopia(
+  admin: SupabaseClient,
+  organizationId: string,
+  nome: string,
+): Promise<string> {
+  const base = nomeBase(nome);
+  const { data } = await admin
+    .from("campaigns")
+    .select("name")
+    .eq("organization_id", organizationId)
+    .ilike("name", `${base.replace(/[\\%_]/g, "\\$&")} (cópia%`);
+  let maior = 0;
+  for (const { name } of (data ?? []) as Array<{ name: string }>) {
+    const m = /\(cópia(?: (\d+))?\)\s*$/i.exec(name);
+    if (m) maior = Math.max(maior, m[1] ? Number(m[1]) : 1);
+  }
+  // O sufixo cabe sempre: é o nome que encolhe, não a numeração.
+  const sufixo = ` (cópia ${maior + 1})`;
+  return `${base.slice(0, 160 - sufixo.length)}${sufixo}`;
+}
+
 export async function duplicarAcao(
   admin: SupabaseClient,
   c: CampanhaCarregada,
   autorId: string,
 ): Promise<Desfecho<{ id: string }>> {
+  const { data: origem } = await admin
+    .from("campaigns")
+    .select("pipeline_id, stage_id, agent_id")
+    .eq("id", c.id)
+    .maybeSingle();
+  const destino = (origem ?? {}) as { pipeline_id?: string | null; stage_id?: string | null; agent_id?: string | null };
   const { data, error } = await admin
     .from("campaigns")
     .insert({
       organization_id: c.organization_id,
-      name: `${c.name} (cópia)`.slice(0, 160),
+      name: await proximoNomeDeCopia(admin, c.organization_id, c.name),
+      pipeline_id: destino.pipeline_id ?? null,
+      stage_id: destino.stage_id ?? null,
+      agent_id: destino.agent_id ?? null,
       description: c.description,
       channel_session_id: c.channel_session_id,
       message_body: c.message_body,
@@ -376,6 +411,176 @@ export async function duplicarAcao(
     };
   }
   return { ok: true, id: (data as { id: string }).id };
+}
+
+const POR_PAGINA = 200;
+
+/**
+ * Troca o texto de QUEM AINDA NÃO RECEBEU. Quem já saiu mantém o que recebeu.
+ *
+ * Só com a campanha parada (pausada, preparada ou agendada): com ela em `running`
+ * o worker reserva o próximo pendente a cada rodada, e a troca correria contra
+ * ele — alguém receberia o texto velho no meio da mudança. Pausar é o preço da
+ * garantia de que ninguém fura a fila.
+ *
+ * Cada pendente é re-renderizado com o texto novo (nome, dias sem pedir, campos
+ * personalizados). Quem não tem um dado que o texto novo exige sai da lista com
+ * o mesmo motivo da preparação (`variavel_ausente`), em vez de receber "Olá ,".
+ */
+export async function editarMensagemAcao(
+  admin: SupabaseClient,
+  c: CampanhaCarregada,
+  corpo: string,
+): Promise<Desfecho<{ atualizados: number; removidos: number }>> {
+  if (c.status !== "paused" && c.status !== "ready" && c.status !== "scheduled") {
+    return {
+      ok: false,
+      codigo: "campanha_estado_invalido",
+      mensagem: "Pause a campanha antes de trocar a mensagem — assim ninguém recebe o texto antigo durante a troca.",
+      status: 409,
+    };
+  }
+  const texto = corpo.trim();
+  if (texto === "") {
+    return { ok: false, codigo: "campanha_conteudo_invalido", mensagem: "Escreva a mensagem.", status: 422 };
+  }
+
+  const versao = c.content_version + 1;
+  const { data: gravou } = await admin
+    .from("campaigns")
+    .update({ message_body: texto, content_version: versao })
+    .eq("id", c.id)
+    .eq("status", c.status)
+    .select("id");
+  if ((gravou ?? []).length === 0) return conflitoDeCorrida();
+
+  let atualizados = 0;
+  let removidos = 0;
+  for (;;) {
+    // `content_version < versao` é o que faz o laço andar: quem foi tratado sai do filtro.
+    const { data: lote } = await admin
+      .from("campaign_recipients")
+      .select("id, contact_id, variables, contacts(id, name, display_name, phone_number)")
+      .eq("organization_id", c.organization_id)
+      .eq("campaign_id", c.id)
+      .eq("status", "pending")
+      .lt("content_version", versao)
+      .order("id", { ascending: true })
+      .limit(POR_PAGINA);
+    const linhas = (lote ?? []) as unknown as Array<{
+      id: string;
+      contact_id: string;
+      variables: { diasSemPedir?: number | null; ultimoPedido?: string | null } | null;
+      contacts: { id: string; name: string | null; display_name: string | null; phone_number: string | null } | null;
+    }>;
+    if (linhas.length === 0) break;
+
+    for (const l of linhas) {
+      const campos = await camposDoDestinatario(admin, {
+        organizationId: c.organization_id,
+        contactId: l.contact_id,
+        corpo: texto,
+      });
+      const r = renderizar(texto, {
+        nome: l.contacts ? nomeDoContato(l.contacts) : null,
+        diasSemPedir: l.variables?.diasSemPedir ?? null,
+        ultimoPedido: l.variables?.ultimoPedido ?? null,
+        ...campos,
+      });
+      const mudanca =
+        r.faltando.length > 0
+          ? {
+              status: "skipped",
+              eligibility_status: "excluded",
+              exclusion_reason: "variavel_ausente",
+              recipient_address: null,
+              content_version: versao,
+            }
+          : { rendered_body: r.texto, content_version: versao };
+      // `status = pending` de novo: se o worker pegou este destinatário entre a
+      // leitura e a escrita, ele sai com o texto antigo e não o sobrescrevemos.
+      const { data: tocou } = await admin
+        .from("campaign_recipients")
+        .update(mudanca)
+        .eq("id", l.id)
+        .eq("status", "pending")
+        .select("id");
+      if ((tocou ?? []).length > 0) {
+        if (r.faltando.length > 0) removidos += 1;
+        else atualizados += 1;
+      }
+    }
+  }
+
+  if (removidos > 0) await recontarSnapshot(admin, c);
+  return { ok: true, atualizados, removidos };
+}
+
+/**
+ * Tira da lista quem ainda NÃO recebeu (selecionados, ou todos os pendentes).
+ *
+ * Não apaga contato nenhum do CRM: o destinatário vira "Fora da lista"
+ * (`excluido_manualmente`) só NESTA campanha. Quem já foi enviado não é tocado —
+ * a mensagem já saiu e o histórico dela fica.
+ */
+export async function removerDestinatariosAcao(
+  admin: SupabaseClient,
+  c: CampanhaCarregada,
+  entrada: { ids?: string[]; todos?: boolean },
+): Promise<Desfecho<{ removidos: number }>> {
+  if (c.status !== "ready" && c.status !== "scheduled" && c.status !== "paused" && c.status !== "running") {
+    return {
+      ok: false,
+      codigo: "campanha_estado_invalido",
+      mensagem: "Só dá para tirar gente da lista de uma campanha preparada que ainda não terminou.",
+      status: 409,
+    };
+  }
+  let q = admin
+    .from("campaign_recipients")
+    .update({
+      status: "skipped",
+      eligibility_status: "excluded",
+      exclusion_reason: "excluido_manualmente",
+      recipient_address: null,
+    })
+    .eq("organization_id", c.organization_id)
+    .eq("campaign_id", c.id)
+    // `pending` e nada mais: quem está `queued`/`sending` pode ter a mensagem na
+    // borda neste instante, e prometer que não sai seria mentir.
+    .eq("status", "pending");
+  if (!entrada.todos) {
+    const ids = entrada.ids ?? [];
+    if (ids.length === 0) {
+      return { ok: false, codigo: "campanha_conteudo_invalido", mensagem: "Selecione quem sai da lista.", status: 422 };
+    }
+    q = q.in("id", ids);
+  }
+  const { data, error } = await q.select("id");
+  if (error) {
+    return { ok: false, codigo: "campanha_estado_invalido", mensagem: error.message, status: 422 };
+  }
+  const removidos = (data ?? []).length;
+  if (removidos > 0) await recontarSnapshot(admin, c);
+  return { ok: true, removidos };
+}
+
+/** Os totais da tela refletem a lista de agora, não a da preparação. */
+async function recontarSnapshot(admin: SupabaseClient, c: CampanhaCarregada): Promise<void> {
+  const contar = async (eligibility: "eligible" | "excluded") => {
+    const { count } = await admin
+      .from("campaign_recipients")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", c.organization_id)
+      .eq("campaign_id", c.id)
+      .eq("eligibility_status", eligibility);
+    return count ?? 0;
+  };
+  const [elegiveis, excluidos] = await Promise.all([contar("eligible"), contar("excluded")]);
+  await admin
+    .from("campaigns")
+    .update({ snapshot_eligible: elegiveis, snapshot_excluded: excluidos, snapshot_total: elegiveis + excluidos })
+    .eq("id", c.id);
 }
 
 /**
