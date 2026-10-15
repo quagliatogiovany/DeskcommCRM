@@ -8,6 +8,17 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+### Fork Nodus — campanhas e contatos (2026-10-14, `bcfd90399`)
+
+- **Preparar lista não trava mais por rascunho:** só campanhas preparadas, agendadas, rodando ou pausadas reservam contatos, e só as linhas elegíveis. O erro "nenhum pode receber" agora lista os motivos com a contagem.
+- **Trocar a mensagem de quem ainda não recebeu** (campanha pausada, preparada ou agendada): re-renderiza só os pendentes; quem já recebeu mantém o texto.
+- **Tirar da campanha em massa** (selecionados ou todos que não receberam): vira "Fora da lista", sem apagar o contato.
+- **Seletor de hora** (00:00–24:00, com exemplo) na criação, no detalhe e nos padrões de campanha, no lugar do campo numérico.
+- **Duplicar** numera "(cópia N)", leva funil, agente e números do rodízio, e já prepara a lista.
+- **Sem nome, o disparo sai:** `{{nome}}`/`{{primeiro_nome}}` vazio some do texto e a frase se fecha ("Olá, tudo bem?"). Os demais dados faltantes continuam tirando a pessoa da lista.
+- **Contatos: exclusão em massa** (`POST /api/v1/contacts/bulk-delete`, papel gerente, lotes de 200, confirmação digitada acima de 20). Apaga o contato e o histórico; contatos com compromisso na Agenda ficam de fora.
+- Sem migration.
+
 ## [1.73.0] — 2026-10-05
 
 ### Adicionado
