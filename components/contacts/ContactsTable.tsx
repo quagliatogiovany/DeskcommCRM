@@ -45,6 +45,10 @@ interface Props {
   orderBy: ContactOrderBy;
   orderDir: "asc" | "desc";
   onSort: (column: ContactOrderBy) => void;
+  /** Seleção em massa — só aparece quando a tela que usa a tabela passa os três. */
+  selecionados?: ReadonlySet<string>;
+  onAlternar?: (id: string) => void;
+  onAlternarTodos?: () => void;
 }
 
 function displayName(c: Contact, t: (texto: string) => string = (texto) => texto): string {
@@ -108,7 +112,15 @@ function SortableHead({
   );
 }
 
-export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
+export function ContactsTable({
+  contacts,
+  orderBy,
+  orderDir,
+  onSort,
+  selecionados,
+  onAlternar,
+  onAlternarTodos,
+}: Props) {
   const localeDaData = useLocaleDeData();
   const t = useT();
   const clientesLigado = useActiveOrg()?.cliente_pela_agenda === true;
@@ -182,6 +194,16 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
     <Table>
       <TableHeader>
         <TableRow>
+          {selecionados && onAlternar && onAlternarTodos && (
+            <TableHead className="w-10">
+              <input
+                type="checkbox"
+                checked={contacts.length > 0 && contacts.every((c) => selecionados.has(c.id))}
+                onChange={onAlternarTodos}
+                aria-label={t("Selecionar todos os contatos carregados")}
+              />
+            </TableHead>
+          )}
           <SortableHead
             label={t("Nome")}
             column="display_name"
@@ -220,6 +242,16 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
       <TableBody>
         {contacts.map((c) => (
           <TableRow key={c.id} className="cursor-pointer">
+            {selecionados && onAlternar && (
+              <TableCell>
+                <input
+                  type="checkbox"
+                  checked={selecionados.has(c.id)}
+                  onChange={() => onAlternar(c.id)}
+                  aria-label={`${t("Selecionar")} ${displayName(c, t)}`}
+                />
+              </TableCell>
+            )}
             <TableCell className="font-medium">
               <Link href={`/app/contacts/${c.id}`} className="hover:underline">
                 {displayName(c)}

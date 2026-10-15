@@ -28,6 +28,18 @@ import { useActiveOrg } from "@/hooks/auth/AuthProvider";
 import { MergeDialog } from "@/components/contacts/MergeDialog";
 import { EmptyContacts } from "@/components/empty";
 import type { ContactOrderBy } from "@/lib/schemas/contacts";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { apiClient } from "@/lib/api/client";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const SOURCE_OPTIONS = [
   { value: undefined, label: "Todas as origens" },
@@ -103,6 +115,62 @@ export function ContactsListClient() {
     if (clientesLigado) set.add(TAG_DE_CLIENTE);
     return Array.from(set).sort();
   }, [allContacts, clientesLigado]);
+
+  // ── Exclusão em massa ──────────────────────────────────────────────────
+  // A seleção vale só para o que está CARREGADO na tela: "todos" nunca quer dizer
+  // "todos que a busca encontraria", porque o operador só confirma o que viu.
+  const qc = useQueryClient();
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [confirmandoLote, setConfirmandoLote] = useState(false);
+  const [confirmacaoDigitada, setConfirmacaoDigitada] = useState("");
+  const [excluindoLote, setExcluindoLote] = useState(false);
+  const PALAVRA_DE_CONFIRMACAO = "EXCLUIR";
+  const exigeDigitar = selecionados.size > 20;
+
+  const alternar = (id: string) =>
+    setSelecionados((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(id)) novo.delete(id);
+      else novo.add(id);
+      return novo;
+    });
+  const alternarTodos = () =>
+    setSelecionados((atual) =>
+      allContacts.every((c) => atual.has(c.id)) ? new Set() : new Set(allContacts.map((c) => c.id)),
+    );
+
+  async function excluirSelecionados() {
+    setExcluindoLote(true);
+    const ids = [...selecionados];
+    let apagados = 0;
+    const barrados: Array<{ id: string; motivo: string }> = [];
+    try {
+      // Lotes de 200 (o teto da rota). Se um lote falhar por inteiro, o que já
+      // saiu fica registrado e o restante permanece selecionado para tentar de novo.
+      for (let i = 0; i < ids.length; i += 200) {
+        const r = await apiClient.post<{ data: { apagados: number; barrados: Array<{ id: string; motivo: string }> } }>(
+          "/api/v1/contacts/bulk-delete",
+          { ids: ids.slice(i, i + 200) },
+        );
+        apagados += r.data.apagados;
+        barrados.push(...r.data.barrados);
+      }
+    } catch {
+      toast.error(t("A exclusão foi interrompida. Confira a lista e tente de novo."));
+    } finally {
+      await qc.invalidateQueries({ queryKey: ["contacts"] });
+      setSelecionados(new Set(barrados.map((b) => b.id)));
+      setExcluindoLote(false);
+      setConfirmandoLote(false);
+      setConfirmacaoDigitada("");
+    }
+    if (apagados > 0) toast.success(`${apagados} ${apagados === 1 ? t("contato excluído.") : t("contatos excluídos.")}`);
+    if (barrados.length > 0) {
+      toast.error(
+        `${barrados.length} ${t("não puderam ser excluídos (ficaram selecionados):")} ${barrados[0]!.motivo}`,
+      );
+    }
+  }
 
   const handleSort = useCallback(
     (column: ContactOrderBy) => {
@@ -309,12 +377,33 @@ export function ContactsListClient() {
         </Card>
       ) : (
         <>
+          {selecionados.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning-fg bg-surface p-2 text-sm">
+              <span>
+                <strong>{selecionados.size}</strong> {selecionados.size === 1 ? t("selecionado") : t("selecionados")}
+              </span>
+              <Button size="sm" variant="destructive" onClick={() => setConfirmandoLote(true)}>
+                {t("Excluir selecionados")}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelecionados(new Set())}>
+                {t("Limpar seleção")}
+              </Button>
+              {q.hasNextPage && (
+                <span className="text-muted-foreground">
+                  {t("Só os contatos carregados entram. Use “Carregar mais” para incluir outros.")}
+                </span>
+              )}
+            </div>
+          )}
           <Card className="overflow-hidden">
             <ContactsTable
               contacts={allContacts}
               orderBy={orderBy}
               orderDir={orderDir}
               onSort={handleSort}
+              selecionados={selecionados}
+              onAlternar={alternar}
+              onAlternarTodos={alternarTodos}
             />
           </Card>
           <div className="flex flex-col items-center gap-2 sm:flex-row sm:justify-between">
@@ -335,6 +424,47 @@ export function ContactsListClient() {
           </div>
         </>
       )}
+
+      <AlertDialog
+        open={confirmandoLote}
+        onOpenChange={(open) => {
+          if (!open && !excluindoLote) {
+            setConfirmandoLote(false);
+            setConfirmacaoDigitada("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("Excluir")} {selecionados.size} {selecionados.size === 1 ? t("contato?") : t("contatos?")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                "Os contatos selecionados e TODO o histórico de conversas deles serão apagados do CRM. Eles saem também de todas as campanhas, inclusive o registro do que já foi enviado a eles (os números dessas campanhas diminuem). Esta ação não pode ser desfeita. Contatos com compromisso na Agenda não são excluídos — ficam selecionados para você resolver.",
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {exigeDigitar && (
+            <div className="space-y-1">
+              <p className="text-sm">
+                {t("Para confirmar, digite")} <strong>{PALAVRA_DE_CONFIRMACAO}</strong>:
+              </p>
+              <Input value={confirmacaoDigitada} onChange={(e) => setConfirmacaoDigitada(e.target.value)} />
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={excluindoLote}>{t("Cancelar")}</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={excluindoLote || (exigeDigitar && confirmacaoDigitada.trim() !== PALAVRA_DE_CONFIRMACAO)}
+              onClick={() => void excluirSelecionados()}
+            >
+              {excluindoLote ? t("Excluindo…") : `${t("Excluir")} ${selecionados.size}`}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <NewContactDialog open={createOpen} onOpenChange={setCreateOpen} />
       <ImportContactsDialog open={importOpen} onOpenChange={setImportOpen} />
