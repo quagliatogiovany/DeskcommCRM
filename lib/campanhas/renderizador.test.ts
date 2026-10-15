@@ -22,12 +22,19 @@ describe("renderizador da campanha", () => {
     expect(r.texto).toBe("Oi João");
   });
 
-  it("não envia texto com buraco: variável sem valor volta como FALTANDO e o literal fica", () => {
-    const r = renderizar("Olá {{nome}}, tudo bem?", { nome: "   " });
-    expect(r.faltando).toEqual(["nome"]);
-    // O literal preservado é o que deixa o defeito visível na prévia em vez de
-    // virar "Olá , tudo bem?" na conversa de um cliente.
-    expect(r.texto).toBe("Olá {{nome}}, tudo bem?");
+  it("sem nome o disparo sai: o token some e a frase se fecha, sem 'Olá , tudo bem?'", () => {
+    expect(renderizar("Olá {{nome}}, tudo bem?", { nome: "   " })).toMatchObject({
+      texto: "Olá, tudo bem?",
+      faltando: [],
+    });
+    expect(renderizar("Olá, {{primeiro_nome}}! Temos novidade.", { nome: null }).texto).toBe("Olá! Temos novidade.");
+    expect(renderizar("{{nome}}, tudo bem?", { nome: null }).texto).toBe("Tudo bem?");
+  });
+
+  it("variável que não é o nome, sem valor, continua FALTANDO e o literal fica", () => {
+    const r = renderizar("Seu último pedido: {{ultimo_pedido}}", { nome: "Ana" });
+    expect(r.faltando).toEqual(["ultimo_pedido"]);
+    expect(r.texto).toBe("Seu último pedido: {{ultimo_pedido}}");
   });
 
 

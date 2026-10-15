@@ -36,6 +36,7 @@ import {
   useTextosSalvos,
   useTirarDaExclusao,
 } from "@/hooks/campanhas/useConfiguracao";
+import { SeletorDeHora, erroDaJanela } from "@/components/campanhas/SeletorDeHora";
 import { useT } from "@/hooks/i18n/useT";
 import { ArrowBendUpLeft } from "@/lib/ui/icons";
 
@@ -121,8 +122,11 @@ function Padroes() {
         <Campo id="p-dia" rotulo={t("Máximo por dia")} valor={tetoDia} onChange={setTetoDia} />
         <Campo id="p-hora" rotulo={t("Máximo por hora")} valor={tetoHora} onChange={setTetoHora} />
         <div />
-        <Campo id="p-inicio" rotulo={t("Enviar só a partir das (hora)")} valor={inicio} onChange={setInicio} />
-        <Campo id="p-fim" rotulo={t("Parar de enviar às (hora)")} valor={fim} onChange={setFim} />
+        <SeletorDeHora id="p-inicio" tipo="inicio" rotulo={t("Enviar só a partir das")} valor={inicio} onChange={setInicio} />
+        <SeletorDeHora id="p-fim" tipo="fim" rotulo={t("Parar de enviar às")} valor={fim} onChange={setFim} />
+        {erroDaJanela(inicio, fim, t) && (
+          <p className="text-sm text-error-fg sm:col-span-2">{erroDaJanela(inicio, fim, t)}</p>
+        )}
       </div>
 
       <p className="text-sm text-muted-foreground">
@@ -136,7 +140,7 @@ function Padroes() {
       <div className="flex items-center gap-3">
         <Button
           size="sm"
-          disabled={salvar.isPending}
+          disabled={salvar.isPending || erroDaJanela(inicio, fim, t) !== ""}
           onClick={() =>
             salvar.mutate({
               atribuicao_horas: Number(atribuicao) || 72,

@@ -62,8 +62,8 @@ export const RAIZES_DE_CAMPO = ["lead", "contato"] as const;
 
 /** O que a tela mostra ao lado de cada variável. */
 export const DESCRICAO_DA_VARIAVEL: Record<VariavelDaCampanha, string> = {
-  nome: "Nome do contato, como está no cadastro",
-  primeiro_nome: "Só a primeira palavra do nome",
+  nome: "Nome do contato, como está no cadastro (sem nome, a frase se fecha sozinha: “Oi, tudo bem?”)",
+  primeiro_nome: "Só a primeira palavra do nome (sem nome, some do texto)",
   saudacao: "Bom dia / Boa tarde / Boa noite, na hora do envio",
   dias_sem_pedir: "Quantos dias sem pedir (só em campanha de recuperação)",
   ultimo_pedido: "Itens do último pedido (só em campanha de recuperação)",
@@ -106,6 +106,23 @@ export interface TextoRenderizado {
   desconhecidas: string[];
 }
 
+/** Marca onde o nome faltou; some em `fecharBuracoDoNome`. Caractere de uso privado: não existe em texto de gente. */
+const SEM_NOME = "";
+
+/**
+ * "Olá , tudo bem?" nunca chega ao cliente. Onde o nome faltou:
+ *  - "Olá, {{nome}}!"      → "Olá!"
+ *  - "Olá {{nome}}, tudo"  → "Olá, tudo"
+ *  - "{{nome}}, tudo bem?" → "Tudo bem?"
+ */
+function fecharBuracoDoNome(texto: string): string {
+  if (!texto.includes(SEM_NOME)) return texto;
+  return texto
+    .replace(/[ \t]*,[ \t]*(?=[!?.:;])/g, "")
+    .replace(/(^|\n)[ \t,;:!-]*(\S)/g, (_m, ini: string, c: string) => `${ini}${c.toUpperCase()}`)
+    .replace(/[ \t]*/g, "");
+}
+
 export function renderizar(
   template: string,
   valores: ValoresDoDestinatario,
@@ -118,13 +135,17 @@ export function renderizar(
   const texto = template.replace(TOKEN, (literal, bruto: string) => {
     const chave = bruto.toLowerCase();
     switch (chave) {
+      // Sem nome NÃO tira a pessoa da lista: o importante é o disparo sair. O
+      // token some e a frase se fecha ("Oi {{nome}}, tudo bem?" → "Oi, tudo
+      // bem?") — ver `fecharBuracoDoNome`. Os outros dados (último pedido, campo
+      // personalizado) continuam sendo FALTA: sem eles a frase não faz sentido.
       case "nome": {
-        if (nome === "") return marcarFalta(faltando, "nome", literal);
+        if (nome === "") return SEM_NOME;
         return blindar(nome);
       }
       case "primeiro_nome": {
         const primeiro = nome.split(/\s+/)[0] ?? "";
-        if (primeiro === "") return marcarFalta(faltando, "primeiro_nome", literal);
+        if (primeiro === "") return SEM_NOME;
         return blindar(primeiro);
       }
       case "saudacao": {
@@ -162,7 +183,8 @@ export function renderizar(
   // A renderização com instante é a FINAL (envio e envio de teste): só aqui a
   // blindagem sai. Sem instante (preparação), ela fica no corpo congelado e
   // protege o valor da segunda passada que o envio faz — ver `blindar`.
-  const final = quando ? texto.replaceAll(CHAVE_BLINDADA, "{") : texto;
+  const semBuraco = fecharBuracoDoNome(texto);
+  const final = quando ? semBuraco.replaceAll(CHAVE_BLINDADA, "{") : semBuraco;
   return { texto: final, faltando: [...faltando], desconhecidas: [...desconhecidas] };
 }
 
